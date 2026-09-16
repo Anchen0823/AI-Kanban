@@ -32,6 +32,9 @@ logs/
 tmp/
 .tmp/
 
+# --- 助手工作状态（保留在磁盘，但不属于项目源码） ---
+.workbuddy/
+
 # --- 编辑器 / 系统 ---
 .vscode/*
 !.vscode/extensions.json
