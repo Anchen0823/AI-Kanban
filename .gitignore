@@ -23,6 +23,13 @@ exports/
 .env.*.local
 
 # --- 探针与临时文件 ---
+# 约定：助手排障时产生的临时脚本/输出一律以点开头，一律不入库。
+# 这不是洁癖 —— 这类文件里经常带着本机路径、端口号或测试用的令牌，
+# 混进仓库后很难被发现。
+scripts/.*
+.*-test.txt
+.*-probe.txt
+.probe-*.txt
 .env-probe.txt
 .core-test.txt
 .server-test.txt
