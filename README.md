@@ -45,10 +45,25 @@ npm run dev            # 同时启动 API(8787) 与 Vite(5173)
 
 ```bash
 npm run verify:sqlite  # SQLite 驱动最小兼容性验证
-npm test               # core + server 全部测试（当前 132 项）
+npm test               # core + server 全部测试（当前 137 项）
 npm run typecheck
 npm run verify:smoke   # 真实 HTTP 端到端冒烟（会真的启动服务进程）
 ```
+
+### 起不来的时候
+
+**`端口 8787 已被占用`** —— 最常见的原因是上一个实例还在运行（关掉终端窗口不会结束进程）。
+启动脚本会直接打印排查命令；也可以换端口起：
+
+```bash
+AICC_PORT=8788 npm start        # PowerShell: $env:AICC_PORT=8788; npm start
+```
+
+**服务本身能连、界面打不开** —— 先确认前端产物是否构建过（`npm run build`），
+服务端只会把 `apps/web/dist` 里的东西当作静态资源提供。
+
+**数据在哪** —— 默认 `data/ai-control-center.sqlite`（可用 `AICC_DATA_DIR` 改）。
+备份是「设置与连接」页里的一键操作，或者直接复制 `data/backups/` 下的目录。
 
 ---
 
