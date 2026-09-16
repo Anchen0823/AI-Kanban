@@ -1,0 +1,19 @@
+{
+  "name": "@aicc/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "本地单用户服务：SQLite 主库、HTTP API、导入、审核、导出、备份",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --disable-warning=ExperimentalWarning dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --disable-warning=ExperimentalWarning --import tsx --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@aicc/core": "0.1.0",
+    "fastify": "5.12.5"
+  }
+}
