@@ -20,7 +20,7 @@
 | INV-13 | 上下文构建**先权限过滤再检索** | `selectContextItems` 的过滤顺序；`buildContext` 先解析授权范围 | `context.test.ts`；`reliability.test.ts` M03 |
 | INV-14 | 所有时间以 UTC 存储，展示时再转时区 | `nowIso()` 只产出 UTC ISO-8601 | 全部时间相关用例 |
 | INV-15 | 写 API 校验会话凭据 + Origin/Host + CSRF 头；凭据只存哈希 | `http/server.ts` 的 `onRequest` / `requireUser` / `requireScope` | `reliability.test.ts` R03 |
-| INV-16 | demo 数据 `is_demo = 1`，可一键清空，界面持续可见标识 | `countDemoRows` / `purgeDemoData`；前端顶栏常驻提示 | `database.test.ts` |
+| INV-16 | demo 数据独立工作区：真实视图一行不出现，示例视图能看到全部且不含真实数据，可一键清空，界面持续可见标识 | `db/repos/workspace.ts` 的三态范围 + `countDemoRows` / `purgeDemoData`；前端顶栏切换 | `database.test.ts` 双向隔离用例 |
 | INV-17 | 备份前必须 `wal_checkpoint(TRUNCATE)`，备份件带 schema 版本与校验和 | `DbConnection.backupTo`；`createBackup` 写 manifest | `reliability.test.ts` R01 |
 
 ---
@@ -57,6 +57,21 @@ SQLite 的 `BEGIN` 不能嵌套，而服务层天然会出现嵌套调用：
 单独测每个服务全绿。这个问题是真实 HTTP 冒烟验证发现的，进程内 `inject` 的测试第一次也没覆盖到。
 
 修复：用连接级的深度计数让 `tx()` 可重入，嵌套调用加入外层事务。内层失败连带回滚整个外层。
+
+### 4. 「demo 隔离」被实现成了「demo 隐身」
+
+设计稿 §8 写的是「演示数据使用**单独的 demo workspace** 和持续可见的标识，
+**不能污染真实总览**」——这是两件事。
+
+实现只做了「不污染」：所有视图都排除 `is_demo = 1`。于是用户点了「生成示例数据」，
+界面上依然一片空白，示例数据等于白生成。而**全部验收测试都是绿的** ——
+因为它们断言的正是「示例数据不出现在真实统计里」。
+
+修复：三态工作区范围（`real` / `demo` / `all`），前端顶栏切换，
+API 客户端统一给所有读取带上参数，杜绝「概览是示例、明细是真实」的混搭。
+
+这条不属于「代码写错了」，而属于「把文档里的一句话读漏了半句」——
+也是唯一一条靠**自己把应用跑一遍**才发现的。
 
 ---
 
