@@ -1,0 +1,26 @@
+{
+  "name": "@aicc/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "领域模型与纯逻辑：金额、Token 归一化、幂等去重、额度新鲜度、记忆生命周期",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "test": "node --disable-warning=ExperimentalWarning --import tsx --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}
