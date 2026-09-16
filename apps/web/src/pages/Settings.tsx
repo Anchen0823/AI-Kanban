@@ -7,6 +7,7 @@ import {
   type SelfCheck,
 } from '../api.js';
 import type { PageProps } from '../App.js';
+import { RegistryPanel } from './Registry.js';
 import {
   Alert,
   Badge,
@@ -31,7 +32,7 @@ import {
  */
 
 export function SettingsPage({ refreshToken, reload, toast }: PageProps): ReactNode {
-  const [tab, setTab] = useState<'selfcheck' | 'connections' | 'credentials' | 'backup' | 'audit' | 'demo'>('selfcheck');
+  const [tab, setTab] = useState<'registry' | 'selfcheck' | 'connections' | 'credentials' | 'backup' | 'audit' | 'demo'>('registry');
   const [selfCheck, setSelfCheck] = useState<SelfCheck | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationRecord[]>([]);
   const [statusMeaning, setStatusMeaning] = useState<Record<string, string>>({});
@@ -74,6 +75,7 @@ export function SettingsPage({ refreshToken, reload, toast }: PageProps): ReactN
       <div className="pill-group">
         {(
           [
+            ['registry', '登记'],
             ['selfcheck', '自检'],
             ['connections', '能力登记'],
             ['credentials', '代理凭据'],
@@ -89,6 +91,8 @@ export function SettingsPage({ refreshToken, reload, toast }: PageProps): ReactN
       </div>
 
       {error ? <Alert tone="danger" title="加载失败">{error}</Alert> : null}
+
+      {tab === 'registry' ? <RegistryPanel toast={toast} reload={reload} /> : null}
 
       {tab === 'selfcheck' && selfCheck ? (
         <>
@@ -297,7 +301,9 @@ export function SettingsPage({ refreshToken, reload, toast }: PageProps): ReactN
                       只读探测
                     </button>
                     <span className="faint tiny">
-                      M0 不执行真实探测：点击后只会把「尚未验证」这一事实记下来。
+                      {it.id === 'itg_codex_usage'
+                        ? '会真起一个 codex app-server 子进程做只读探测，用完即关。前提是本机装有 Codex CLI 且它自己已登录。'
+                        : '这条还没有探测适配器：点击只会把「尚未验证」这一事实记下来，不会去猜。'}
                     </span>
                   </div>
                 </div>
@@ -629,7 +635,9 @@ function CredentialsPanel({
                 </option>
               ))}
             </select>
-            <span className="help">没有客户端就先到「设置与连接 → 能力登记」旁边…… 其实直接调用 /api/clients 即可。</span>
+            <span className="help">
+              还没有客户端？到本页的「登记 → 客户端」创建一个，再回到这里签发。
+            </span>
           </label>
           <label className="field">
             <span>标签</span>

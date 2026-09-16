@@ -315,6 +315,7 @@ export interface ClientRecord {
   kind: string;
   displayName: string;
   clientVersion: string | null;
+  mcpProfile: string | null;
   allowedProjects: string[] | null;
 }
 
@@ -322,6 +323,7 @@ export interface AccountRecord {
   id: string;
   provider: string;
   alias: string;
+  accountRef: string | null;
   currency: string;
 }
 
@@ -329,9 +331,13 @@ export interface SubscriptionRecord {
   id: string;
   name: string;
   accountId: string | null;
+  plan: string | null;
   priceMinor: string;
   currency: string;
   billingCycle: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  renewAt: string | null;
   status: string;
   clientIds: string[];
 }

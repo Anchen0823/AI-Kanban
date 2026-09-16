@@ -279,7 +279,7 @@ function PageSubtitle({ page }: { page: PageKey }): ReactNode {
     memory: '候选箱与正式库。AI 只能提案，批准是你一个人的动作。',
     projects: '目标、当前状态、决策、失败路径与可归属费用。上下文包按项目生成。',
     bridge: '不依赖任何新连接的跨工具路径：把候选带进来，把上下文带出去。',
-    settings: '能力登记、权限、数据目录与备份恢复。区分「官方文档说支持」与「本机已验证」。',
+    settings: '登记、自检、能力台账、凭据、备份与审计。区分「官方文档说支持」与「本机已验证」。',
   };
   return <div className="sub">{text[page]}</div>;
 }
