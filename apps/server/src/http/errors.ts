@@ -65,6 +65,19 @@ export function toApiError(err: unknown): ApiError {
     const issues = (err as { issues: unknown }).issues;
     return new ApiError(400, 'invalid_input', '请求参数校验未通过', issues);
   }
+
+  // Fastify 自己的错误（请求体解析失败、body 超限等）自带 statusCode。
+  // 不认它的话，「JSON 语法错误」会被报成 500 内部错误，把调用方引向错误的方向。
+  if (err && typeof err === 'object') {
+    const candidate = err as { statusCode?: unknown; status?: unknown; code?: unknown; message?: unknown };
+    const status = typeof candidate.statusCode === 'number' ? candidate.statusCode : candidate.status;
+    if (typeof status === 'number' && status >= 400 && status < 500) {
+      const code = typeof candidate.code === 'string' && candidate.code.length > 0 ? candidate.code : 'invalid_input';
+      const message = typeof candidate.message === 'string' ? candidate.message : '请求无法处理';
+      return new ApiError(status, code, message);
+    }
+  }
+
   const message = err instanceof Error ? err.message : String(err);
   return new ApiError(500, 'internal', message);
 }

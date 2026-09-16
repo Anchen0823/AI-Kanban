@@ -62,14 +62,41 @@ export function buildServer(deps: HttpDeps): FastifyInstance {
   const { config } = deps;
 
   const fastify = Fastify({
+    // logger: false 已经关掉了请求日志；不要再加 disableRequestLogging，
+    // 它在 Fastify 5.12 起已废弃（fastify 6 会移除），加了只会每次测试刷一行弃用警告。
     logger: false,
     bodyLimit: config.maxBodyBytes,
     // 本地单用户：不做信任代理推断，直接看真实 socket 地址
     trustProxy: false,
-    disableRequestLogging: true,
   });
 
   fastify.decorateRequest('requestId', '');
+
+  /**
+   * 空 JSON 请求体按 `{}` 处理。
+   *
+   * 默认行为是：只要带 `content-type: application/json` 而请求体为空，就直接报错
+   * （"Body cannot be empty when content-type is set to 'application/json'"），
+   * 而且这个错误会被包成 500。像 `curl -X POST -H 'content-type: application/json'`、
+   * 或者前端 `fetch(url, {method:'POST', headers:{...}})` 不带 body 这种很常见的写法，
+   * 会拿到一个「服务器内部错误」——完全看不出真正原因。
+   *
+   * 这里把它变成 `{}`，与「没写请求体」完全等价；**语法错误的 JSON 依然会报错**，
+   * 并不会被这层宽容吞掉。
+   */
+  fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body, done) => {
+    if (body === undefined || body === null || (typeof body === 'string' && body.trim().length === 0)) {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(body as string));
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      error.statusCode = 400;
+      done(error, undefined);
+    }
+  });
 
   fastify.addHook('onRequest', async (request, reply) => {
     request.requestId = `req_${Math.random().toString(36).slice(2, 10)}`;

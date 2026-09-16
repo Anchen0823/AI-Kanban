@@ -171,6 +171,16 @@ export const zImportInput = z.object({
   accountId: zId.nullable().default(null),
   projectId: zId.nullable().default(null),
   clientId: zId.nullable().default(null),
+  /**
+   * 数据来源必须由用户声明，系统不替用户猜。
+   *
+   * 「这份 CSV 是官网导出的」和「这是我自己拼出来的日志」在可信度上差别很大，
+   * 而这个差别只存在于用户脑子里 —— 猜错就会在界面上显示成一个看起来很确定的数字。
+   */
+  collectionMethod: z.enum(COLLECTION_METHODS).default('imported_file'),
+  measurementQuality: z.enum(MEASUREMENT_QUALITIES).default('provider_reported'),
+  /** 覆盖范围说明，例如「仅 codex 客户端」「2026-08 账单」。 */
+  coverageScope: z.string().max(200).nullable().optional(),
   /** 仅预检不落库。 */
   dryRun: z.boolean().default(false),
 });
@@ -260,6 +270,63 @@ export const zProposalReviewInput = z.object({
   /** 批准时可微调正文；系统会记录这与提案原文的差异。 */
   overrideTitle: z.string().min(1).max(200).nullable().optional(),
   overrideContent: z.string().min(1).max(20000).nullable().optional(),
+  /**
+   * 内容命中墓碑（之前删除过同样内容）时必须显式确认，否则批准会被拒绝。
+   * 默认 false —— 不允许「顺手就复活了一条已删除的记忆」（INV-12 / M05）。
+   */
+  acknowledgeTombstone: z.boolean().default(false),
+});
+
+/**
+ * ChatGPT 桥接用的候选记忆包（§6.3 的格式）。
+ *
+ * 字段刻意与设计稿里的示例一致：`source.source_ref = null` 表示没有可验证链接，
+ * 系统不会替模型编一个出来。
+ */
+export const zCandidateMemory = z.object({
+  schema_version: z.string().max(20).optional(),
+  operation: z.enum(PROPOSAL_OPERATIONS).default('create'),
+  target_memory_id: z.string().max(64).nullable().optional(),
+  base_version: z.number().int().positive().nullable().optional(),
+  scope: z.enum(MEMORY_SCOPES).default('project'),
+  project_id: z.string().max(64).nullable().optional(),
+  kind: z.enum(MEMORY_KINDS),
+  title: z.string().min(1).max(200),
+  content: z.string().min(1).max(20000),
+  source: z
+    .object({
+      kind: z.enum(SOURCE_KINDS).default('chatgpt_summary'),
+      source_ref: z.string().max(500).nullable().optional(),
+      evidence_quote: z.string().max(4000).nullable().optional(),
+      evidence_status: z
+        .enum(['verified', 'user_confirmation_required', 'unknown'])
+        .default('user_confirmation_required'),
+    })
+    .default({
+      kind: 'chatgpt_summary',
+      source_ref: null,
+      evidence_quote: null,
+      evidence_status: 'user_confirmation_required',
+    }),
+  sensitivity: z.enum(SENSITIVITY_LEVELS).default('normal'),
+  verification: z.enum(VERIFICATION_STATES).default('unverified'),
+  review_after: zIsoDate.nullable().optional(),
+  /** 与提案正文一起展示，便于逐条核对。 */
+  evidence_quote: z.string().max(4000).nullable().optional(),
+});
+
+export const zMemoryCandidateImportInput = z.object({
+  fileName: z.string().min(1).max(255).default('candidates.json'),
+  content: z.string().min(1),
+  /**
+   * 候选里的 project_id 到本系统项目 ID 的显式映射。
+   * 未映射且无法按 ID / 标题匹配的项目引用会保持为空并报告给用户，
+   * 不会因为 AI 写了一个项目名就自动创建项目。
+   */
+  projectMapping: z.record(z.string(), zId).default({}),
+  /** 默认项目：候选里没写 project_id 时使用。 */
+  defaultProjectId: zId.nullable().default(null),
+  dryRun: z.boolean().default(false),
 });
 
 export const zMemoriesQuery = z.object({

@@ -115,10 +115,24 @@ export function normalizeOpenAiLike(raw: Record<string, unknown>): NormalizedTok
     );
   }
 
-  const totalReported = inputTotal === null && outputTotal === null ? null : (inputTotal ?? 0) + (outputTotal ?? 0);
-
   const providerTotal = readToken(raw, 'total_tokens') ?? readPath(raw, ['usage', 'total_tokens']);
-  if (providerTotal !== null && totalReported !== null && providerTotal !== totalReported) {
+
+  // 供应商只给了总量、没给 I/O 分量的情况很常见（账户汇总、部分网关）。
+  // 以前这里会把它当成「未知」，结果是整行被拒 —— 那等于把一条真实存在的记录丢掉，
+  // 只因为它的形状和我们预期的不一样。现在按自报值保留总量，并明确标注无法核对子集语义。
+  const totalOnly = inputTotal === null && outputTotal === null && providerTotal !== null;
+
+  const totalReported = totalOnly
+    ? providerTotal
+    : inputTotal === null && outputTotal === null
+      ? null
+      : (inputTotal ?? 0) + (outputTotal ?? 0);
+
+  if (totalOnly) {
+    warnings.push(
+      '供应商只报告了总量，没有输入/输出分量。总量按自报值保留，但无法核对缓存/推理是否为子集。',
+    );
+  } else if (providerTotal !== null && totalReported !== null && providerTotal !== totalReported) {
     warnings.push(
       `供应商 total_tokens(${providerTotal}) 与本系统按子集语义算出的总量(${totalReported}) 不一致；以子集语义为准，差异保留待核查。`,
     );

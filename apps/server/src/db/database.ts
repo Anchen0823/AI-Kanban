@@ -232,12 +232,42 @@ export class TxAbort extends Error {
 }
 
 /**
+ * 当前连接的事务嵌套深度。
+ *
+ * 为什么需要它：SQLite 的 `BEGIN` **不可嵌套**。而服务层天然会出现嵌套调用 ——
+ * 例如「生成示例数据」在自己事务里调用「创建候选」，后者也要保证原子性。
+ * 早期实现直接 `BEGIN`，结果是 `cannot start a transaction within a transaction`，
+ * 而且只在同时走了这两条路径时才会出现（单独测每个服务都是好的）。
+ *
+ * 语义：嵌套调用**加入外层事务**，不再单独提交。内层失败会连带回滚整个外层事务 ——
+ * 这正是我们想要的「要么全成功要么全回滚」。
+ */
+const txDepth = new WeakMap<DbConnection, number>();
+
+export function transactionDepth(db: DbConnection): number {
+  return txDepth.get(db) ?? 0;
+}
+
+/**
  * 同步事务。业务写入、记忆版本与审计必须同一事务提交（§9.2）。
  *
+ * 可重入：已经在外层事务里时，直接执行不再 BEGIN。
  * 抛出的异常一律回滚。`TxAbort` 用于携带一个有意义的错误码给 HTTP 层。
  */
 export function tx<T>(db: DbConnection, fn: () => T): T {
+  const depth = txDepth.get(db) ?? 0;
+
+  if (depth > 0) {
+    txDepth.set(db, depth + 1);
+    try {
+      return fn();
+    } finally {
+      txDepth.set(db, depth);
+    }
+  }
+
   db.exec('BEGIN');
+  txDepth.set(db, 1);
   try {
     const result = fn();
     db.exec('COMMIT');
@@ -249,6 +279,8 @@ export function tx<T>(db: DbConnection, fn: () => T): T {
       // 回滚本身失败（例如连接已断）时不要让原始错误被覆盖
     }
     throw err;
+  } finally {
+    txDepth.set(db, 0);
   }
 }
 

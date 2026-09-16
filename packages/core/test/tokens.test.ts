@@ -36,6 +36,27 @@ test('U02：输入含缓存、输出含推理时总量为 12,000 而非 19,000',
   assert.equal(computeTotalFromParts({ inputTotal: n.inputTotal, outputTotal: n.outputTotal }), 12000);
 });
 
+test('供应商只报告总量时保留总量，并说明无法核对子集语义', () => {
+  // 这是回归测试。以前这种输入会被当成「未知」，导致整条记录被拒 ——
+  // 等于把一条真实记录丢掉，只因为它的形状和预期的不一样。
+  const n = normalizeOpenAiLike({ total_tokens: 99999 });
+  assert.equal(n.totalReported, 99999);
+  assert.equal(n.inputTotal, null);
+  assert.equal(n.outputTotal, null, '没有分量就是 null，不能凭空拆出一个输入数');
+  assert.equal(n.warnings.length, 1);
+  assert.match(n.warnings[0] as string, /只报告了总量/);
+});
+
+test('有分量时以分量为准，供应商自报总量只用于交叉核对', () => {
+  const n = normalizeOpenAiLike({ input_tokens: 10, output_tokens: 5, total_tokens: 15 });
+  assert.equal(n.totalReported, 15);
+  assert.deepEqual(n.warnings, [], '一致时不该报警');
+
+  const mismatch = normalizeOpenAiLike({ input_tokens: 10, output_tokens: 5, total_tokens: 999 });
+  assert.equal(mismatch.totalReported, 15);
+  assert.match(mismatch.warnings[0] as string, /不一致/);
+});
+
 test('U02 变体：cached 与 reasoning 为 0 是真实值，不是未知', () => {
   const n = normalizeOpenAiLike({
     input_tokens: 500,

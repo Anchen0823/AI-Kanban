@@ -20,7 +20,7 @@ import {
   createProject,
   createSession,
 } from '../db/repos/registry.js';
-import { insertIntegration, purgeDemoData, databaseCounts } from '../db/repos/system.js';
+import { countDemoRows, insertIntegration, purgeDemoData, hasDemoData } from '../db/repos/system.js';
 import type { ServiceContext } from '../service-context.js';
 import { audit } from './audit.js';
 import { createProposal, reviewProposal } from './memory.js';
@@ -33,9 +33,10 @@ export interface SeedReport {
 }
 
 export function seedDemo(ctx: ServiceContext): SeedReport {
-  const existing = databaseCounts(ctx.db, true).client ?? 0;
-  if (existing > 0) {
-    throw new Error('已存在 demo 数据。请先清空 demo 数据再重新生成，避免出现两套示例。');
+  // 只检查示例数据本身，不检查「表里有没有数据」。
+  // 用后者会导致「先建了一个真实客户端，就再也生不成示例」这种莫名其妙的失败。
+  if (hasDemoData(ctx.db)) {
+    throw new Error('已存在示例数据。请先清空示例数据再重新生成，避免出现两套示例。');
   }
 
   const now = ctx.now();
@@ -531,16 +532,14 @@ export function resetDemo(ctx: ServiceContext): ResetReport {
 }
 
 export function demoStatus(ctx: ServiceContext): { hasDemoData: boolean; counts: Record<string, number> } {
-  const counts = databaseCounts(ctx.db, true);
-  const real = databaseCounts(ctx.db, false);
-  const demoOnly: Record<string, number> = {};
-  let hasDemoData = false;
-  for (const [table, total] of Object.entries(counts)) {
-    const diff = total - (real[table] ?? 0);
-    if (diff > 0) {
-      demoOnly[table] = diff;
-      hasDemoData = true;
+  const demoOnly = countDemoRows(ctx.db);
+  const nonZero: Record<string, number> = {};
+  let hasAny = false;
+  for (const [table, count] of Object.entries(demoOnly)) {
+    if (count > 0) {
+      nonZero[table] = count;
+      hasAny = true;
     }
   }
-  return { hasDemoData, counts: demoOnly };
+  return { hasDemoData: hasAny, counts: nonZero };
 }

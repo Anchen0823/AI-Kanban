@@ -771,6 +771,46 @@ export interface DemoCounts {
   [table: string]: number;
 }
 
+/**
+ * 库里是否存在示例数据。
+ *
+ * 只看 `is_demo = 1` 的行，**不是**看「表里有没有数据」。
+ * 这个区别很重要：早期实现用「有没有客户端」来判定，结果只要你先建了一个真实客户端，
+ * 就再也无法生成示例数据了 —— 报错还说「已存在 demo 数据」，让人完全摸不着头脑。
+ */
+export function countDemoRows(db: DbConnection): DemoCounts {
+  const counts: DemoCounts = {};
+  for (const table of DEMO_TABLES) {
+    if (table === 'memory_revision') {
+      counts[table] =
+        db
+          .prepare(
+            'SELECT COUNT(*) AS n FROM memory_revision r JOIN memory m ON m.id = r.memory_id WHERE m.is_demo = 1',
+          )
+          .get<{ n: number }>()?.n ?? 0;
+      continue;
+    }
+    if (table === 'subscription_client') {
+      counts[table] =
+        db
+          .prepare(
+            'SELECT COUNT(*) AS n FROM subscription_client sc JOIN subscription s ON s.id = sc.subscription_id WHERE s.is_demo = 1',
+          )
+          .get<{ n: number }>()?.n ?? 0;
+      continue;
+    }
+    counts[table] =
+      db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE is_demo = 1`).get<{ n: number }>()?.n ?? 0;
+  }
+  counts.memory_tombstone =
+    db.prepare('SELECT COUNT(*) AS n FROM memory_tombstone').get<{ n: number }>()?.n ?? 0;
+  return counts;
+}
+
+export function hasDemoData(db: DbConnection): boolean {
+  return Object.values(countDemoRows(db)).some((n) => n > 0);
+}
+
 /** 清空所有 demo 数据。真实数据（is_demo = 0）一行都不会动。 */
 export function purgeDemoData(db: DbConnection): DemoCounts {
   const counts: DemoCounts = {};
