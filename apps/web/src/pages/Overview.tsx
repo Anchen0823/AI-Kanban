@@ -403,6 +403,11 @@ export function OverviewPage({ navigate, refreshToken }: PageProps): ReactNode {
 
       <Card title="本机信息" hint="这些值直接来自运行中的服务，不是写死的文案">
         <div className="kv">
+          <dt>数据工作区</dt>
+          <dd>
+            {data.workspace}
+            <span className="faint tiny"> · 示例数据与真实数据分开展示，互不污染</span>
+          </dd>
           <dt>SQLite 驱动</dt>
           <dd className="mono">{data.driver}</dd>
           <dt>数据目录</dt>

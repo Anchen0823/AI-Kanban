@@ -61,6 +61,7 @@ import {
 import { invalidateContextExports, listContextExports } from '../db/repos/system.js';
 import { guardImportPayload } from '../imports/guard.js';
 import { parseJsonRecords } from '../imports/parse.js';
+import type { WorkspaceScope } from '../db/repos/workspace.js';
 import type { ServiceContext } from '../service-context.js';
 import { audit } from './audit.js';
 
@@ -619,6 +620,7 @@ export function searchMemories(
     includeHistory?: boolean;
     limit?: number;
     offset?: number;
+    workspace?: WorkspaceScope;
   },
 ) {
   const statuses: MemoryStatus[] | undefined = query.status
@@ -639,11 +641,15 @@ export interface MemoryDetail {
   project: { id: string; title: string } | null;
 }
 
-export function getMemoryDetail(ctx: ServiceContext, memoryId: string): MemoryDetail | null {
+export function getMemoryDetail(
+  ctx: ServiceContext,
+  memoryId: string,
+  workspace: WorkspaceScope = 'real',
+): MemoryDetail | null {
   const memory = getMemory(ctx.db, memoryId);
   if (!memory) return null;
   const supersedes = memory.supersedesId ? (getMemory(ctx.db, memory.supersedesId) ?? null) : null;
-  const exports = listContextExports(ctx.db, memory.projectId ?? undefined, 200).filter((e) =>
+  const exports = listContextExports(ctx.db, memory.projectId ?? undefined, 200, workspace).filter((e) =>
     e.memoryRefs.some((r) => r.memoryId === memoryId),
   );
   const sessions = memory.projectId
@@ -660,20 +666,28 @@ export function getMemoryDetail(ctx: ServiceContext, memoryId: string): MemoryDe
   };
 }
 
-export function memoryCounters(ctx: ServiceContext) {
+export function memoryCounters(ctx: ServiceContext, workspace: WorkspaceScope = 'real') {
   return {
-    active: countMemoriesByStatus(ctx.db, 'active'),
-    archived: countMemoriesByStatus(ctx.db, 'archived'),
-    expired: countMemoriesByStatus(ctx.db, 'expired'),
-    superseded: countMemoriesByStatus(ctx.db, 'superseded'),
-    pendingProposals: countPendingProposals(ctx.db),
+    active: countMemoriesByStatus(ctx.db, 'active', workspace),
+    archived: countMemoriesByStatus(ctx.db, 'archived', workspace),
+    expired: countMemoriesByStatus(ctx.db, 'expired', workspace),
+    superseded: countMemoriesByStatus(ctx.db, 'superseded', workspace),
+    pendingProposals: countPendingProposals(ctx.db, workspace),
+    // 墓碑没有 is_demo 列：它只含哈希，且必须跨工作区生效（旧导入包不能复活任何工作区里删过的内容）
     tombstones: countTombstones(ctx.db),
+    workspace,
   };
 }
 
 export function listProposalQueue(
   ctx: ServiceContext,
-  options: { status?: 'pending' | 'approved' | 'rejected' | 'conflict'; projectId?: string; limit?: number; offset?: number },
+  options: {
+    status?: 'pending' | 'approved' | 'rejected' | 'conflict';
+    projectId?: string;
+    limit?: number;
+    offset?: number;
+    workspace?: WorkspaceScope;
+  },
 ) {
   return listProposals(ctx.db, options);
 }
@@ -774,12 +788,12 @@ export interface DeletePreview {
  * 这里最重要的一段是 `cannotDelete`：由系统替用户说清楚「你以为删干净了，
  * 其实还有几处副本在你自己手里」。
  */
-export function deletePreview(ctx: ServiceContext, memoryId: string): DeletePreview {
+export function deletePreview(ctx: ServiceContext, memoryId: string, workspace: WorkspaceScope = 'real'): DeletePreview {
   const memory = getMemory(ctx.db, memoryId);
   if (!memory) throw new TxAbort('not_found', `记忆不存在：${memoryId}`);
 
   const revisions = listRevisions(ctx.db, memoryId);
-  const exports = listContextExports(ctx.db, memory.projectId ?? undefined, 500).filter((e) =>
+  const exports = listContextExports(ctx.db, memory.projectId ?? undefined, 500, workspace).filter((e) =>
     e.memoryRefs.some((r) => r.memoryId === memoryId),
   );
   const existingTombstone = findTombstoneByMemoryId(ctx.db, memoryId);

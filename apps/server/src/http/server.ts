@@ -18,6 +18,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type { App } from '../app.js';
 import type { AppConfig } from '../config.js';
 import { findCredentialByTokenHash, touchCredential } from '../db/repos/system.js';
+import { parseWorkspace, type WorkspaceScope } from '../db/repos/workspace.js';
 import { appendAudit } from '../db/repos/system.js';
 import { ApiError, errorBody, toApiError } from './errors.js';
 import { isUser, parseCookies, SESSION_COOKIE, type Principal, type SessionStore } from './auth.js';
@@ -281,6 +282,18 @@ export function requireScope(request: FastifyRequest, scope: string): Principal 
 }
 
 export { principalProjectScope, isUser } from './auth.js';
+
+/**
+ * 读取请求里的工作区范围。
+ *
+ * 默认 'real'：真实视图里一行示例数据都不出现（设计稿 §8「不能污染真实总览」）。
+ * 要看示例数据必须显式传 workspace=demo。前端切工作区时会给所有读取一起带上这个参数，
+ * 避免出现「概览是示例、明细是真实」这种混搭。
+ */
+export function workspaceOf(request: FastifyRequest): WorkspaceScope {
+  const query = request.query as Record<string, unknown> | undefined;
+  return parseWorkspace(query?.workspace);
+}
 
 /** 静态资源：只允许读取 web/dist 之下的文件。 */
 function serveStatic(

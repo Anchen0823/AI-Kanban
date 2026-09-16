@@ -28,7 +28,7 @@ import {
 import { ApiError } from '../errors.js';
 import { parseCookies, SESSION_COOKIE, type SessionStore } from '../auth.js';
 import type { ServiceContext } from '../../service-context.js';
-import { requirePrincipal, requireUser, type HttpDeps } from '../server.js';
+import { requirePrincipal, requireUser, workspaceOf, type HttpDeps } from '../server.js';
 const zPairInput = z.object({
   code: z.string().min(4).max(32),
   label: z.string().max(120).default('本机浏览器'),
@@ -184,7 +184,7 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
       .object({ limit: z.coerce.number().int().min(1).max(500).default(100), action: z.string().max(80).optional() })
       .parse(request.query ?? {});
     return {
-      events: readAudit(ctx, q),
+      events: readAudit(ctx, { ...q, workspace: workspaceOf(request) }),
       note: '审计只保留动作、ID、时间与结果，不复制被删除内容的全文。',
     };
   });
@@ -280,7 +280,7 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
   fastify.get('/api/integrations', async (request) => {
     requirePrincipal(request);
     return {
-      integrations: listIntegrations(app.db),
+      integrations: listIntegrations(app.db, workspaceOf(request)),
       statusMeaning: {
         documented: '官方文档或公开资料支持，但本机尚未验证。界面不得显示为「已同步」。',
         verified: '本机实测通过，并且附了证据。',
@@ -377,7 +377,7 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
     requirePrincipal(request);
     return {
       clients: listClients(app.db),
-      integrations: listIntegrations(app.db),
+      integrations: listIntegrations(app.db, workspaceOf(request)),
       demo: demoStatus(ctx),
       counts: databaseCounts(app.db, false),
     };

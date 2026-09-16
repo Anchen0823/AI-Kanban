@@ -11,6 +11,7 @@ import {
   type ImportStatus,
 } from '@aicc/core';
 import type { DbConnection } from '../database.js';
+import { workspaceClause, type WorkspaceScope } from './workspace.js';
 
 /* ------------------------------------------------------------------ */
 /* 设置                                                                */
@@ -202,9 +203,9 @@ export function getImportJob(db: DbConnection, id: string): ImportJob | undefine
   return row ? toImportJob(row) : undefined;
 }
 
-export function listImportJobs(db: DbConnection, limit = 50): ImportJob[] {
+export function listImportJobs(db: DbConnection, limit = 50, workspace: WorkspaceScope = 'real'): ImportJob[] {
   const rows = db
-    .prepare('SELECT * FROM import_job WHERE is_demo = 0 ORDER BY started_at DESC LIMIT ?')
+    .prepare(`SELECT * FROM import_job WHERE ${workspaceClause(workspace)} ORDER BY started_at DESC LIMIT ?`)
     .all<ImportRow>(Math.min(limit, 200));
   return rows.map(toImportJob);
 }
@@ -344,10 +345,10 @@ export function findIntegrationByName(db: DbConnection, name: string): Integrati
   return row ? toIntegration(row) : undefined;
 }
 
-export function listIntegrations(db: DbConnection, options: { includeDemo?: boolean } = {}): Integration[] {
-  const rows = options.includeDemo
-    ? db.prepare('SELECT * FROM integration ORDER BY category, name').all<IntegrationRow>()
-    : db.prepare('SELECT * FROM integration WHERE is_demo = 0 ORDER BY category, name').all<IntegrationRow>();
+export function listIntegrations(db: DbConnection, workspace: WorkspaceScope = 'real'): Integration[] {
+  const rows = db
+    .prepare(`SELECT * FROM integration WHERE ${workspaceClause(workspace)} ORDER BY category, name`)
+    .all<IntegrationRow>();
   return rows.map(toIntegration);
 }
 
@@ -510,13 +511,22 @@ export function getContextExport(db: DbConnection, id: string): ContextExportRec
   return row ? toContextExport(row) : undefined;
 }
 
-export function listContextExports(db: DbConnection, projectId?: string, limit = 50): ContextExportRecord[] {
+export function listContextExports(
+  db: DbConnection,
+  projectId?: string,
+  limit = 50,
+  workspace: WorkspaceScope = 'real',
+): ContextExportRecord[] {
   const rows = projectId
     ? db
-        .prepare('SELECT * FROM context_export WHERE project_id = ? AND is_demo = 0 ORDER BY created_at DESC LIMIT ?')
+        .prepare(
+          `SELECT * FROM context_export WHERE project_id = ? AND ${workspaceClause(workspace)} ORDER BY created_at DESC LIMIT ?`,
+        )
         .all<ContextRow>(projectId, Math.min(limit, 200))
     : db
-        .prepare('SELECT * FROM context_export WHERE is_demo = 0 ORDER BY created_at DESC LIMIT ?')
+        .prepare(
+          `SELECT * FROM context_export WHERE ${workspaceClause(workspace)} ORDER BY created_at DESC LIMIT ?`,
+        )
         .all<ContextRow>(Math.min(limit, 200));
   return rows.map(toContextExport);
 }
@@ -718,13 +728,17 @@ export function appendAudit(
   );
 }
 
-export function listAudit(db: DbConnection, options: { limit?: number; action?: string } = {}): AuditEvent[] {
+export function listAudit(
+  db: DbConnection,
+  options: { limit?: number; action?: string; workspace?: WorkspaceScope } = {},
+): AuditEvent[] {
+  const ws = workspaceClause(options.workspace ?? 'real');
   const rows = options.action
     ? db
-        .prepare('SELECT * FROM audit_event WHERE action = ? AND is_demo = 0 ORDER BY seq DESC LIMIT ?')
+        .prepare(`SELECT * FROM audit_event WHERE action = ? AND ${ws} ORDER BY seq DESC LIMIT ?`)
         .all<AuditRow>(options.action, Math.min(options.limit ?? 100, 500))
     : db
-        .prepare('SELECT * FROM audit_event WHERE is_demo = 0 ORDER BY seq DESC LIMIT ?')
+        .prepare(`SELECT * FROM audit_event WHERE ${ws} ORDER BY seq DESC LIMIT ?`)
         .all<AuditRow>(Math.min(options.limit ?? 100, 500));
   return rows.map((row) => ({
     seq: row.seq,

@@ -15,6 +15,7 @@ import {
   type QuotaWindowKind,
 } from '@aicc/core';
 import type { DbConnection } from '../database.js';
+import { workspaceClause, type WorkspaceScope } from './workspace.js';
 
 export interface QuotaSnapshot {
   id: string;
@@ -159,14 +160,14 @@ export function getQuotaSnapshot(db: DbConnection, id: string): QuotaSnapshot | 
  * 用窗口函数而不是 `GROUP BY` + `MAX(observed_at)`：后者在观测时间相同时
  * 会随机挑一行，导致界面上的数值在两次刷新之间跳变。
  */
-export function latestQuotaSnapshots(db: DbConnection, options: { includeDemo?: boolean } = {}): QuotaSnapshot[] {
+export function latestQuotaSnapshots(db: DbConnection, scope: WorkspaceScope = 'real'): QuotaSnapshot[] {
   const rows = db
     .prepare(
       `SELECT * FROM (
          SELECT q.*,
                 ROW_NUMBER() OVER (PARTITION BY account_id, bucket_id ORDER BY observed_at DESC, created_at DESC) AS rn
          FROM quota_snapshot q
-         WHERE is_demo = ${options.includeDemo ? 1 : 0}
+         WHERE ${workspaceClause(scope, 'q.')}
        ) WHERE rn = 1
        ORDER BY account_id, window_kind, bucket_id`,
     )

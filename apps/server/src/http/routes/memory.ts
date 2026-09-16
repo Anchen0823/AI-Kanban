@@ -31,7 +31,14 @@ import {
 } from '../../services/memory.js';
 import { audit } from '../../services/audit.js';
 import { ApiError } from '../errors.js';
-import { principalProjectScope, requirePrincipal, requireScope, requireUser, type HttpDeps } from '../server.js';
+import {
+  principalProjectScope,
+  requirePrincipal,
+  requireScope,
+  requireUser,
+  workspaceOf,
+  type HttpDeps,
+} from '../server.js';
 export function registerMemoryRoutes(fastify: FastifyInstance, deps: HttpDeps): void {
   const { app } = deps;
   const ctx = app.ctx;
@@ -57,6 +64,7 @@ export function registerMemoryRoutes(fastify: FastifyInstance, deps: HttpDeps): 
     }
 
     const result = searchMemories(ctx, {
+      workspace: workspaceOf(request),
       projectId: query.projectId,
       scope: query.scope,
       kind: query.kind,
@@ -75,7 +83,7 @@ export function registerMemoryRoutes(fastify: FastifyInstance, deps: HttpDeps): 
     return {
       items,
       total: scope === null ? result.total : items.length,
-      counters: memoryCounters(ctx),
+      counters: memoryCounters(ctx, workspaceOf(request)),
       note: '默认只返回 active。历史视图需要显式传 includeHistory=true。',
     };
   });
@@ -83,7 +91,7 @@ export function registerMemoryRoutes(fastify: FastifyInstance, deps: HttpDeps): 
   fastify.get('/api/memories/:id', async (request) => {
     const principal = requireScope(request, 'memory_get');
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(request.params);
-    const detail = getMemoryDetail(ctx, id);
+    const detail = getMemoryDetail(ctx, id, workspaceOf(request));
     if (!detail) throw new ApiError(404, 'not_found', `记忆不存在：${id}`);
 
     const scope = principalProjectScope(principal);
@@ -128,7 +136,7 @@ export function registerMemoryRoutes(fastify: FastifyInstance, deps: HttpDeps): 
     requireUser(request, '删除预览');
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(request.params);
     return {
-      preview: deletePreview(ctx, id),
+      preview: deletePreview(ctx, id, workspaceOf(request)),
       note: '这是预览，没有任何内容被删除。请特别阅读 cannotDelete 列表。',
     };
   });
@@ -151,6 +159,7 @@ export function registerMemoryRoutes(fastify: FastifyInstance, deps: HttpDeps): 
     const principal = requirePrincipal(request);
     const query = zProposalsQuery.parse(request.query ?? {});
     const result = listProposalQueue(ctx, {
+      workspace: workspaceOf(request),
       status: query.status,
       projectId: query.projectId,
       limit: query.limit,
@@ -159,7 +168,7 @@ export function registerMemoryRoutes(fastify: FastifyInstance, deps: HttpDeps): 
     const scope = principalProjectScope(principal);
     const items =
       scope === null ? result.items : result.items.filter((p) => p.projectId === null || scope.includes(p.projectId));
-    return { items, total: items.length, counters: memoryCounters(ctx) };
+    return { items, total: items.length, counters: memoryCounters(ctx, workspaceOf(request)) };
   });
 
   fastify.get('/api/memory-proposals/:id', async (request) => {

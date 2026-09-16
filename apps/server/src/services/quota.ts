@@ -16,6 +16,7 @@ import {
 import { getAccount } from '../db/repos/registry.js';
 import type { ServiceContext } from '../service-context.js';
 import { audit } from './audit.js';
+import type { WorkspaceScope } from '../db/repos/workspace.js';
 
 export interface QuotaSnapshotInput {
   accountId: string;
@@ -95,12 +96,12 @@ export interface QuotaBucketViewWithFreshness extends QuotaBucketView {
   sourceRef: string | null;
 }
 
-export function quotaBuckets(ctx: ServiceContext): {
+export function quotaBuckets(ctx: ServiceContext, workspace: WorkspaceScope = 'real'): {
   groups: Array<{ windowKind: string; windowLabel: string; buckets: QuotaBucketViewWithFreshness[] }>;
   /** 是否存在需要用户注意的状态（过期 / 待刷新 / 未知）。 */
   needsAttention: number;
 } {
-  const snapshots = latestQuotaSnapshots(ctx.db);
+  const snapshots = latestQuotaSnapshots(ctx.db, workspace);
   const nowMs = ctx.now();
 
   const views: QuotaBucketViewWithFreshness[] = snapshots.map((snapshot) => {

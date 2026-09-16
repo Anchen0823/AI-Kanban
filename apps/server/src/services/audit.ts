@@ -9,6 +9,7 @@
  */
 
 import { appendAudit, listAudit } from '../db/repos/system.js';
+import type { WorkspaceScope } from '../db/repos/workspace.js';
 import type { ServiceContext } from '../service-context.js';
 
 export interface AuditInput {
@@ -39,6 +40,9 @@ export function audit(ctx: ServiceContext, input: AuditInput): void {
   });
 }
 
-export function readAudit(ctx: ServiceContext, options: { limit?: number; action?: string } = {}) {
+export function readAudit(
+  ctx: ServiceContext,
+  options: { limit?: number; action?: string; workspace?: WorkspaceScope } = {},
+) {
   return listAudit(ctx.db, options);
 }

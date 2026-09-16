@@ -16,7 +16,14 @@ import { memoryCounters } from '../../services/memory.js';
 import { audit } from '../../services/audit.js';
 import { toCsv } from '../../imports/guard.js';
 import { ApiError } from '../errors.js';
-import { principalProjectScope, requirePrincipal, requireScope, requireUser, type HttpDeps } from '../server.js';
+import {
+  principalProjectScope,
+  requirePrincipal,
+  requireScope,
+  requireUser,
+  workspaceOf,
+  type HttpDeps,
+} from '../server.js';
 
 /**
  * §7.2 的标准候选记忆提示词。
@@ -80,6 +87,8 @@ export function registerContextRoutes(fastify: FastifyInstance, deps: HttpDeps):
       requestedProjectIds: input.requestedProjectIds ?? null,
       grantedProjectIds: scope,
       createdBy: principal.kind === 'user' ? 'local-user' : principal.label,
+      // 代理凭据始终只读真实工作区：示例数据不应该被送去别的 AI 客户端
+      workspace: principal.kind === 'user' ? workspaceOf(request) : 'real',
       dryRun: false,
     });
 
@@ -102,7 +111,7 @@ export function registerContextRoutes(fastify: FastifyInstance, deps: HttpDeps):
     const q = z
       .object({ projectId: z.string().max(64).optional(), limit: z.coerce.number().int().min(1).max(200).default(50) })
       .parse(request.query ?? {});
-    const exports = listContextExports(app.db, q.projectId, q.limit);
+    const exports = listContextExports(app.db, q.projectId, q.limit, workspaceOf(request));
     return {
       exports: exports.map((e) => ({
         id: e.id,
@@ -182,7 +191,7 @@ export function registerContextRoutes(fastify: FastifyInstance, deps: HttpDeps):
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(request.params);
     const project = getProject(app.db, id);
     if (!project) throw new ApiError(404, 'not_found', `项目不存在：${id}`);
-    const preview = previewContextBudget(ctx, id);
+    const preview = previewContextBudget(ctx, id, workspaceOf(request));
     return {
       project: { id: project.id, title: project.title, goal: project.goal, handoffSummary: project.handoffSummary },
       ...preview,
@@ -233,7 +242,7 @@ export function registerContextRoutes(fastify: FastifyInstance, deps: HttpDeps):
 
   fastify.get('/api/context-exports/invalidated', async (request) => {
     requireUser(request, '查看失效包');
-    const all = listContextExports(app.db, undefined, 200);
+    const all = listContextExports(app.db, undefined, 200, workspaceOf(request));
     const invalidated = all.filter((e) => e.invalidatedAt !== null);
     audit(ctx, {
       action: 'context.export',

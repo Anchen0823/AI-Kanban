@@ -9,6 +9,31 @@
 
 const CSRF_HEADER = 'x-aicc-request';
 
+/**
+ * 当前工作区。
+ *
+ * 为什么放在模块级而不是逐页传参：设计稿 §8 要求示例数据进「单独的 demo workspace」，
+ * 而「单独」必须是全局一致的 —— 一旦某个页面忘了带这个参数，就会出现
+ * 「概览显示示例数据、用量明细显示真实数据」这种最难排查的混搭。
+ * 所以由 API 客户端统一给所有读取加上它。
+ */
+export type Workspace = 'real' | 'demo';
+
+let currentWorkspace: Workspace = 'real';
+
+export function setWorkspace(workspace: Workspace): void {
+  currentWorkspace = workspace;
+}
+
+export function getWorkspace(): Workspace {
+  return currentWorkspace;
+}
+
+function withWorkspace(path: string): string {
+  if (currentWorkspace === 'real' || !path.startsWith('/api/')) return path;
+  return path.includes('?') ? `${path}&workspace=demo` : `${path}?workspace=demo`;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -39,7 +64,7 @@ async function request<T>(
     headers[CSRF_HEADER] = '1';
   }
 
-  const response = await fetch(path, {
+  const response = await fetch(method === 'GET' ? withWorkspace(path) : path, {
     method,
     headers,
     credentials: 'same-origin',
@@ -151,6 +176,8 @@ export interface Overview {
   generatedAt: string;
   driver: string;
   dataDir: string;
+  /** 本次数据来自哪个工作区（真实 / 示例）。 */
+  workspace: string;
   counts: {
     projects: number;
     clients: number;

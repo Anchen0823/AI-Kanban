@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, type SessionInfo } from './api.js';
+import { api, getWorkspace, setWorkspace, type SessionInfo, type Workspace } from './api.js';
 import { Alert, Badge, Modal } from './ui.js';
 import { OverviewPage } from './pages/Overview.js';
 import { UsagePage } from './pages/Usage.js';
@@ -67,6 +67,7 @@ export function App(): ReactNode {
   const [refreshToken, setRefreshToken] = useState(0);
   const [demoCounts, setDemoCounts] = useState<Record<string, number>>({});
   const [clearingDemo, setClearingDemo] = useState(false);
+  const [workspace, setWorkspaceState] = useState<Workspace>(getWorkspace());
 
   const toast = useCallback((text: string, tone: ToastTone = 'info') => {
     const id = Date.now() + Math.random();
@@ -99,6 +100,16 @@ export function App(): ReactNode {
   }, [loadSession]);
 
   const demoTotal = useMemo(() => Object.values(demoCounts).reduce((a, b) => a + b, 0), [demoCounts]);
+
+  const switchWorkspace = useCallback(
+    (next: Workspace) => {
+      setWorkspace(next);
+      setWorkspaceState(next);
+      setPage('overview');
+      reload();
+    },
+    [reload],
+  );
 
   if (session === null) {
     return <div className="gate faint">正在读取本机会话…</div>;
@@ -142,6 +153,22 @@ export function App(): ReactNode {
             <PageSubtitle page={page} />
           </div>
           <div className="page-actions">
+            {demoTotal > 0 ? (
+              <div className="pill-group" title="示例数据独立存放，永不进入真实统计">
+                <button
+                  className={`tag-btn${workspace === 'real' ? ' active' : ''}`}
+                  onClick={() => switchWorkspace('real')}
+                >
+                  真实数据
+                </button>
+                <button
+                  className={`tag-btn${workspace === 'demo' ? ' active' : ''}`}
+                  onClick={() => switchWorkspace('demo')}
+                >
+                  示例数据
+                </button>
+              </div>
+            ) : null}
             <button className="ghost" onClick={reload}>
               刷新数据
             </button>
@@ -157,20 +184,39 @@ export function App(): ReactNode {
           </div>
         </header>
 
-        {demoTotal > 0 ? (
+        {workspace === 'demo' ? (
           <div style={{ marginBottom: 14 }}>
-            <Alert tone="info" title="库中存在示例数据">
+            <Alert tone="warn" title="你正在查看示例数据工作区">
+              <span>
+                这里显示的全部是合成数据，名称以「【示例】」开头。它们<strong>不会</strong>
+                进入真实统计数据。
+              </span>
+              <span className="alert-hint">
+                示例数据刻意包含了未知 token、待刷新额度、疑似重复、待审候选、版本冲突等「不完美」状态 ——
+                只放「一切正常」的样例会掩盖这个系统真正在解决的问题。
+              </span>
+              <div className="row tight" style={{ marginTop: 6 }}>
+                <button className="small" onClick={() => switchWorkspace('real')}>
+                  切回真实数据
+                </button>
+              </div>
+            </Alert>
+          </div>
+        ) : null}
+
+        {demoTotal > 0 && workspace === 'real' ? (
+          <div style={{ marginBottom: 14 }}>
+            <Alert tone="info" title="库中存在示例数据（当前未显示）">
               <span>
                 共 {demoTotal} 行示例数据（{Object.entries(demoCounts)
                   .map(([t, n]) => `${t} ${n}`)
                   .join('、')}
-                ）。它们不计入任何真实统计，名称都以「【示例】」开头。
-              </span>
-              <span className="alert-hint">
-                示例数据刻意包含了未知 token、待刷新额度、疑似重复、待审候选等「不完美」状态 ——
-                只放「一切正常」的样例会掩盖这个系统真正在解决的问题。
+                ）。它们不计入本页任何数字。
               </span>
               <div className="row tight" style={{ marginTop: 6 }}>
+                <button className="small" onClick={() => switchWorkspace('demo')}>
+                  查看示例数据
+                </button>
                 <button
                   className="small"
                   disabled={clearingDemo || forbidden.has('demo_reset')}

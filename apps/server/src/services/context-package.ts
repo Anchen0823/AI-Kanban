@@ -25,6 +25,7 @@ import { getProject } from '../db/repos/registry.js';
 import { insertContextExport } from '../db/repos/system.js';
 import type { ServiceContext } from '../service-context.js';
 import { audit } from './audit.js';
+import type { WorkspaceScope } from '../db/repos/workspace.js';
 
 export interface BuildContextInput {
   projectId: string;
@@ -38,7 +39,8 @@ export interface BuildContextInput {
   /** 调用方实际被授权的项目范围（来自凭据或用户会话）。null = 用户本机不受限。 */
   grantedProjectIds: string[] | null;
   createdBy: string;
-  isDemo?: boolean;
+  /** 工作区：真实 / 示例 / 全部。默认只读真实数据。 */
+  workspace?: WorkspaceScope;
   /** 只预览不落库。 */
   dryRun?: boolean;
 }
@@ -67,9 +69,10 @@ export function buildContext(ctx: ServiceContext, input: BuildContextInput): Bui
 
   const budgetTokens = budgetFor(input.budgetKind, input.customBudgetTokens ?? undefined);
 
+  const workspace = input.workspace ?? 'real';
   const memories = listActiveMemoriesForProject(ctx.db, input.projectId, {
     includeGlobal: input.includeGlobalMemory === true,
-    includeDemo: input.isDemo,
+    workspace,
   });
 
   const candidates: ContextCandidate[] = memories.map((m) => toCandidate(m, input.task ?? null));
@@ -126,7 +129,8 @@ export function buildContext(ctx: ServiceContext, input: BuildContextInput): Bui
       contentJson: json,
       memoryRefs: selection.selected.map((i) => ({ memoryId: i.memoryId, version: i.version })),
       createdBy: input.createdBy,
-      isDemo: input.isDemo,
+      // 在示例工作区里生成的包也标记为示例，这样它不会混进真实工作区的包列表
+      isDemo: workspace === 'demo',
     });
 
     audit(ctx, {
@@ -145,7 +149,7 @@ export function buildContext(ctx: ServiceContext, input: BuildContextInput): Bui
         memoryVersions: selection.selected.map((i) => `${i.memoryId}@${i.version}`),
       },
       actorKind: input.createdBy === ctx.actor ? 'user' : 'agent',
-      isDemo: input.isDemo,
+      isDemo: workspace === 'demo',
     });
 
     return {
@@ -216,8 +220,9 @@ function toCandidate(memory: Memory, task: string | null): ContextCandidate {
 export function previewContextBudget(
   ctx: ServiceContext,
   projectId: string,
+  workspace: WorkspaceScope = 'real',
 ): { totalCandidates: number; totalEstimatedTokens: number } {
-  const memories = listActiveMemoriesForProject(ctx.db, projectId, { includeGlobal: true });
+  const memories = listActiveMemoriesForProject(ctx.db, projectId, { includeGlobal: true, workspace });
   const totalEstimatedTokens = memories.reduce(
     (acc, m) => acc + estimateTokens(`${m.title}\n${m.content}\n${m.id}`),
     0,

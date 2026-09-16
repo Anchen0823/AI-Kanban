@@ -137,6 +137,123 @@ test('先有真实数据时仍然可以生成示例数据（回归）', async ()
   }
 });
 
+test('工作区隔离是双向的：示例不污染真实，真实也不混进示例', async () => {
+  const h = await createHarness();
+  try {
+    // 真实数据：一个账户、一条用量、一个项目、一条记忆
+    const accountId = (
+      await h.request<{ account: { id: string } }>('POST', '/api/accounts', {
+        provider: '真实供应商',
+        alias: '真实账户',
+        currency: 'CNY',
+      })
+    ).body.account.id;
+
+    await h.request('POST', '/api/usage', {
+      accountId,
+      rawUsage: { input_tokens: 5000, output_tokens: 1000 },
+      basis: 'openai_inclusive',
+      measurementQuality: 'provider_reported',
+    });
+
+    const project = await h.request<{ project: { id: string } }>('POST', '/api/projects', {
+      title: '真实项目',
+    });
+    const realProjectId = project.body.project.id;
+
+    const realProposal = await h.request<{ proposalId: string }>('POST', '/api/memory-proposals', {
+      operation: 'create',
+      scope: 'project',
+      projectId: realProjectId,
+      kind: 'fact',
+      title: '真实记忆标题',
+      content: '这是真实工作区里的内容。',
+      sourceKind: 'manual_input',
+      evidenceStatus: 'verified',
+    });
+    await h.request('POST', `/api/memory-proposals/${realProposal.body.proposalId}/review`, {
+      decision: 'approve',
+      reviewedBy: '测试用户',
+    });
+
+    // 生成示例数据
+    const seeded = await h.request('POST', '/api/demo/seed');
+    assert.equal(seeded.status, 200, JSON.stringify(seeded.body));
+
+    /* ---- 真实视图：一行示例都不出现 ---- */
+    const realOverview = await h.request<{
+      workspace: string;
+      tokens: { observed: number | null };
+      quota: { groups: Array<{ buckets: unknown[] }> };
+      memory: { pendingProposals: number; active: number };
+    }>('GET', '/api/overview');
+    assert.match(realOverview.body.workspace, /真实/);
+    assert.equal(realOverview.body.tokens.observed, 6000, '真实 token 不受示例影响');
+    assert.equal(realOverview.body.quota.groups.length, 0, '示例额度桶不出现在真实视图');
+    assert.equal(realOverview.body.memory.pendingProposals, 0);
+    assert.equal(realOverview.body.memory.active, 1, '只有那条真实记忆');
+
+    const realMemories = await h.request<{ items: Array<{ title: string }> }>('GET', '/api/memories');
+    assert.deepEqual(
+      realMemories.body.items.map((m) => m.title),
+      ['真实记忆标题'],
+    );
+
+    /* ---- 示例视图：示例数据必须真的能看到，且不含真实数据 ---- */
+    const demoOverview = await h.request<{
+      workspace: string;
+      tokens: { observed: number | null; coverage: string };
+      quota: { groups: Array<{ buckets: unknown[] }> };
+      memory: { pendingProposals: number; active: number };
+      usage: { suspectDuplicates: number };
+      attention: Array<{ level: string; text: string }>;
+    }>('GET', '/api/overview?workspace=demo');
+
+    assert.match(demoOverview.body.workspace, /示例/);
+    assert.ok(
+      demoOverview.body.quota.groups.length > 0,
+      '示例额度桶必须能在示例工作区里看到 —— 否则「生成示例数据」等于白生成',
+    );
+    assert.equal(
+      demoOverview.body.memory.pendingProposals,
+      2,
+      '示例里刻意留了 2 条待审候选',
+    );
+    assert.equal(demoOverview.body.memory.active, 1, '示例记忆 1 条');
+    assert.ok(demoOverview.body.usage.suspectDuplicates > 0, '示例里刻意留了疑似重复记录');
+    assert.ok(
+      demoOverview.body.attention.some((a) => a.text.includes('示例数据工作区')),
+      '示例视图必须明确标注自己是示例',
+    );
+
+    const demoMemories = await h.request<{ items: Array<{ title: string }> }>(
+      'GET',
+      '/api/memories?workspace=demo',
+    );
+    const demoTitles = demoMemories.body.items.map((m) => m.title);
+    assert.ok(demoTitles.length > 0, '示例记忆可见');
+    assert.ok(
+      !demoTitles.includes('真实记忆标题'),
+      '真实记忆不得出现在示例工作区里（隔离是双向的）',
+    );
+
+    const demoUsage = await h.request<{ total: number; totals: { tokenValue: number | null } }>(
+      'GET',
+      '/api/usage?workspace=demo&includeNonPrimary=true',
+    );
+    assert.ok(demoUsage.body.total > 0, '示例用量明细可见');
+
+    const realUsage = await h.request<{ total: number }>('GET', '/api/usage?includeNonPrimary=true');
+    assert.equal(realUsage.body.total, 1, '真实用量仍然只有那一条');
+
+    /* ---- 默认值必须是「真实」 ---- */
+    const noParam = await h.request<{ workspace: string }>('GET', '/api/overview');
+    assert.match(noParam.body.workspace, /真实/, '不传 workspace 时必须默认真实工作区');
+  } finally {
+    h.close();
+  }
+});
+
 test('示例数据不进入真实统计，清空后也不留残影', async () => {
   const h = await createHarness();
   try {

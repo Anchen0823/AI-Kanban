@@ -20,6 +20,7 @@ import {
   type VerificationState,
 } from '@aicc/core';
 import type { DbConnection } from '../database.js';
+import { workspaceClause, type WorkspaceScope } from './workspace.js';
 
 /* ------------------------------------------------------------------ */
 /* 来源                                                                */
@@ -142,7 +143,8 @@ export interface MemoryQuery {
   /** 不传时默认只返回 active（普通视图）。 */
   statuses?: MemoryStatus[];
   q?: string;
-  includeDemo?: boolean;
+  /** 工作区：真实 / 示例 / 全部。默认只读真实数据。 */
+  workspace?: WorkspaceScope;
   limit?: number;
   offset?: number;
 }
@@ -157,10 +159,9 @@ function escapeLike(input: string): string {
  * 不假装默认分词器已经解决了中文全文检索。
  */
 export function listMemories(db: DbConnection, query: MemoryQuery = {}): { items: Memory[]; total: number } {
-  const where: string[] = [];
+  const where: string[] = [workspaceClause(query.workspace ?? 'real')];
   const params: Array<string | number> = [];
 
-  if (!query.includeDemo) where.push('is_demo = 0');
   if (query.projectId) {
     where.push('project_id = ?');
     params.push(query.projectId);
@@ -199,7 +200,7 @@ export function listMemories(db: DbConnection, query: MemoryQuery = {}): { items
 export function listActiveMemoriesForProject(
   db: DbConnection,
   projectId: string,
-  options: { includeGlobal?: boolean; includeDemo?: boolean } = {},
+  options: { includeGlobal?: boolean; workspace?: WorkspaceScope } = {},
 ): Memory[] {
   const scopeFilter = options.includeGlobal
     ? "(scope = 'project' AND project_id = ?) OR scope = 'global' OR (scope = 'session' AND project_id = ?)"
@@ -208,16 +209,18 @@ export function listActiveMemoriesForProject(
   const rows = db
     .prepare(
       `SELECT * FROM memory
-       WHERE status = 'active' AND is_demo = ${options.includeDemo ? 1 : 0} AND (${scopeFilter})
+       WHERE status = 'active' AND ${workspaceClause(options.workspace ?? 'real')} AND (${scopeFilter})
        ORDER BY pinned DESC, updated_at DESC`,
     )
     .all<MemoryRow>(...params);
   return rows.map(toMemory);
 }
 
-export function listAllActiveMemories(db: DbConnection, options: { includeDemo?: boolean } = {}): Memory[] {
+export function listAllActiveMemories(db: DbConnection, workspace: WorkspaceScope = 'real'): Memory[] {
   const rows = db
-    .prepare(`SELECT * FROM memory WHERE status = 'active' AND is_demo = ${options.includeDemo ? 1 : 0}`)
+    .prepare(
+      `SELECT * FROM memory WHERE status = 'active' AND ${workspaceClause(workspace)}`,
+    )
     .all<MemoryRow>();
   return rows.map(toMemory);
 }
@@ -808,11 +811,16 @@ export function getProposal(db: DbConnection, id: string): MemoryProposal | unde
 
 export function listProposals(
   db: DbConnection,
-  options: { status?: ProposalStatus; projectId?: string; limit?: number; offset?: number; includeDemo?: boolean } = {},
+  options: {
+    status?: ProposalStatus;
+    projectId?: string;
+    workspace?: WorkspaceScope;
+    limit?: number;
+    offset?: number;
+  } = {},
 ): { items: MemoryProposal[]; total: number } {
-  const where: string[] = [];
+  const where: string[] = [workspaceClause(options.workspace ?? 'real')];
   const params: Array<string | number> = [];
-  if (!options.includeDemo) where.push('is_demo = 0');
   if (options.status) {
     where.push('status = ?');
     params.push(options.status);
@@ -821,7 +829,7 @@ export function listProposals(
     where.push('project_id = ?');
     params.push(options.projectId);
   }
-  const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+  const clause = `WHERE ${where.join(' AND ')}`;
   const total = db.prepare(`SELECT COUNT(*) AS n FROM memory_proposal ${clause}`).get<{ n: number }>(...params)?.n ?? 0;
   const rows = db
     .prepare(`SELECT * FROM memory_proposal ${clause} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
@@ -829,10 +837,12 @@ export function listProposals(
   return { items: rows.map(toProposal), total };
 }
 
-export function countPendingProposals(db: DbConnection): number {
+export function countPendingProposals(db: DbConnection, workspace: WorkspaceScope = 'real'): number {
   return (
     db
-      .prepare("SELECT COUNT(*) AS n FROM memory_proposal WHERE status = 'pending' AND is_demo = 0")
+      .prepare(
+        `SELECT COUNT(*) AS n FROM memory_proposal WHERE status = 'pending' AND ${workspaceClause(workspace)}`,
+      )
       .get<{ n: number }>()?.n ?? 0
   );
 }
@@ -918,10 +928,12 @@ export function findSimilarProposals(
 /* 统计                                                                */
 /* ------------------------------------------------------------------ */
 
-export function countMemoriesByStatus(db: DbConnection, status: MemoryStatus): number {
+export function countMemoriesByStatus(db: DbConnection, status: MemoryStatus, workspace: WorkspaceScope = 'real'): number {
   return (
     db
-      .prepare('SELECT COUNT(*) AS n FROM memory WHERE status = ? AND is_demo = 0')
+      .prepare(
+        `SELECT COUNT(*) AS n FROM memory WHERE status = ? AND ${workspaceClause(workspace)}`,
+      )
       .get<{ n: number }>(status)?.n ?? 0
   );
 }

@@ -46,6 +46,7 @@ import {
   finishImportJob,
 } from '../db/repos/system.js';
 import { guardImportPayload } from '../imports/guard.js';
+import type { WorkspaceScope } from '../db/repos/workspace.js';
 import { mapColumns, parseCsv, parseJsonRecords, CHARGE_COLUMN_SPECS, USAGE_COLUMN_SPECS } from '../imports/parse.js';
 import type { ServiceContext } from '../service-context.js';
 import { audit } from './audit.js';
@@ -890,7 +891,10 @@ export function queryUsage(ctx: ServiceContext, query: UsageQuery) {
   return listObservations(ctx.db, query);
 }
 
-export function queryCharges(ctx: ServiceContext, options: { accountId?: string; limit?: number } = {}): Charge[] {
+export function queryCharges(
+  ctx: ServiceContext,
+  options: { accountId?: string; limit?: number; workspace?: WorkspaceScope } = {},
+): Charge[] {
   return listCharges(ctx.db, options);
 }
 
@@ -912,8 +916,8 @@ export interface UsageTotals {
  * 这里返回的是「已观测」而不是「总消耗」：覆盖范围由 `coverage` 文案说明，
  * 界面不允许只显示一个数字（§4.1）。
  */
-export function usageTotals(ctx: ServiceContext): UsageTotals {
-  const rows = countedObservations(ctx.db);
+export function usageTotals(ctx: ServiceContext, workspace: WorkspaceScope = 'real'): UsageTotals {
+  const rows = countedObservations(ctx.db, workspace);
   const items = rows.map((r) => ({
     tokens: {
       inputTotal: r.inputTotal,
@@ -977,7 +981,7 @@ export function usageTotals(ctx: ServiceContext): UsageTotals {
     byModel: group((r) => r.model).map((g) => ({ model: g.key, value: g.value, count: g.count })),
     byProject: group((r) => r.projectId).map((g) => ({ projectId: g.key, value: g.value, count: g.count })),
     byClient: group((r) => r.clientId).map((g) => ({ clientId: g.key, value: g.value, count: g.count })),
-    suspectCount: countSuspectDuplicates(ctx.db),
+    suspectCount: countSuspectDuplicates(ctx.db, workspace),
   };
 }
 

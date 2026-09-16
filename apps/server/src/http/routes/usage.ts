@@ -20,7 +20,7 @@ import { getImportJob, listImportJobs } from '../../db/repos/system.js';
 import { toCsv } from '../../imports/guard.js';
 import { audit } from '../../services/audit.js';
 import { ApiError } from '../errors.js';
-import { requirePrincipal, requireUser, type HttpDeps } from '../server.js';
+import { requirePrincipal, requireUser, workspaceOf, type HttpDeps } from '../server.js';
 
 export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): void {
   const { app } = deps;
@@ -30,7 +30,7 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
 
   fastify.get('/api/overview', async (request) => {
     requirePrincipal(request);
-    const overview = getOverview(ctx);
+    const overview = getOverview(ctx, workspaceOf(request));
     return {
       ...overview,
       // 概览页的口径声明直接跟着数据一起返回，前端不需要自己编一套文案
@@ -48,10 +48,11 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
   fastify.get('/api/usage', async (request) => {
     requirePrincipal(request);
     const query = zUsageQuery.parse(request.query ?? {});
-    const result = queryUsage(ctx, query);
+    const workspace = workspaceOf(request);
+    const result = queryUsage(ctx, { ...query, workspace });
     return {
       ...result,
-      totals: usageTotals(ctx),
+      totals: usageTotals(ctx, workspace),
       note:
         query.includeNonPrimary === true
           ? '当前查询包含非主统计源（证据行与待确认行）。这些行不计入统计。'
@@ -112,8 +113,8 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
       .object({ accountId: z.string().max(64).optional(), limit: z.coerce.number().int().min(1).max(500).default(200) })
       .parse(request.query ?? {});
     return {
-      charges: queryCharges(ctx, q),
-      buckets: chargeBuckets(ctx),
+      charges: queryCharges(ctx, { ...q, workspace: workspaceOf(request) }),
+      buckets: chargeBuckets(ctx, workspaceOf(request)),
       note: '事件上的费用用于分析，收费流水用于记账。账单与请求明细通过 billingRef 对账，不把两者再算两次。',
     };
   });
@@ -168,7 +169,7 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
 
   fastify.get('/api/quota', async (request) => {
     requirePrincipal(request);
-    const result = quotaBuckets(ctx);
+    const result = quotaBuckets(ctx, workspaceOf(request));
     return {
       ...result,
       note:
@@ -201,7 +202,7 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
   fastify.get('/api/imports', async (request) => {
     requirePrincipal(request);
     return {
-      jobs: listImportJobs(app.db, 50),
+      jobs: listImportJobs(app.db, 50, workspaceOf(request)),
       supportedKinds: ['usage_csv', 'usage_json', 'charge_csv'],
       limits: { maxBytes: app.config.maxImportBytes, maxRows: app.config.maxImportRows },
       note: '记忆候选 JSON 请走 /api/memory-proposals/import。',
@@ -244,7 +245,13 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
   fastify.get('/api/exports/usage.csv', async (request, reply) => {
     requireUser(request, '导出数据');
     const query = zUsageQuery.parse(request.query ?? {});
-    const result = queryUsage(ctx, { ...query, limit: 500, offset: 0, includeNonPrimary: true });
+    const result = queryUsage(ctx, {
+      ...query,
+      limit: 500,
+      offset: 0,
+      includeNonPrimary: true,
+      workspace: workspaceOf(request),
+    });
 
     const csv = toCsv(
       [

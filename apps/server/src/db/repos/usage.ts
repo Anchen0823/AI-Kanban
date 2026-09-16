@@ -18,6 +18,7 @@ import {
   type TokenBasis,
 } from '@aicc/core';
 import type { DbConnection } from '../database.js';
+import { workspaceClause, type WorkspaceScope } from './workspace.js';
 
 /* ------------------------------------------------------------------ */
 /* 用量观测                                                            */
@@ -306,12 +307,14 @@ export interface UsageQuery {
   from?: string;
   to?: string;
   includeNonPrimary?: boolean;
+  /** 工作区：真实 / 示例 / 全部。默认只读真实数据。 */
+  workspace?: WorkspaceScope;
   limit?: number;
   offset?: number;
 }
 
 export function listObservations(db: DbConnection, query: UsageQuery = {}): { items: UsageObservation[]; total: number } {
-  const where: string[] = ['is_demo = 0'];
+  const where: string[] = [workspaceClause(query.workspace ?? 'real')];
   const params: Array<string | number> = [];
 
   if (!query.includeNonPrimary) {
@@ -368,23 +371,26 @@ export function listObservations(db: DbConnection, query: UsageQuery = {}): { it
   return { items: rows.map(toObservation), total };
 }
 
-/** 统计口径：只取主统计源（INV-04）。 */
-export function countedObservations(db: DbConnection, options: { includeDemo?: boolean } = {}): UsageObservation[] {
+/** 统计口径：只取主统计源（INV-04），并且只取当前工作区的数据。 */
+export function countedObservations(db: DbConnection, scope: WorkspaceScope = 'real'): UsageObservation[] {
   const rows = db
     .prepare(
       `SELECT * FROM usage_observation
        WHERE is_primary = 1 AND duplicate_status IN ('none','resolved_unique')
-         AND is_demo = ${options.includeDemo ? 1 : 0}
+         AND ${workspaceClause(scope)}
        ORDER BY COALESCE(occurred_at, observed_at) ASC`,
     )
     .all<ObservationRow>();
   return rows.map(toObservation);
 }
 
-export function countSuspectDuplicates(db: DbConnection): number {
+export function countSuspectDuplicates(db: DbConnection, scope: WorkspaceScope = 'real'): number {
   return (
     db
-      .prepare("SELECT COUNT(*) AS n FROM usage_observation WHERE duplicate_status = 'suspect' AND is_demo = 0")
+      .prepare(
+        `SELECT COUNT(*) AS n FROM usage_observation
+         WHERE duplicate_status = 'suspect' AND ${workspaceClause(scope)}`,
+      )
       .get<{ n: number }>()?.n ?? 0
   );
 }
@@ -567,16 +573,15 @@ export function insertCharge(
 
 export function listCharges(
   db: DbConnection,
-  options: { accountId?: string; includeDemo?: boolean; limit?: number } = {},
+  options: { accountId?: string; workspace?: WorkspaceScope; limit?: number } = {},
 ): Charge[] {
-  const where: string[] = [];
+  const where: string[] = [workspaceClause(options.workspace ?? 'real')];
   const params: Array<string | number> = [];
-  if (!options.includeDemo) where.push('is_demo = 0');
   if (options.accountId) {
     where.push('account_id = ?');
     params.push(options.accountId);
   }
-  const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+  const clause = `WHERE ${where.join(' AND ')}`;
   const rows = db
     .prepare(`SELECT * FROM charge ${clause} ORDER BY COALESCE(paid_at, observed_at) DESC LIMIT ?`)
     .all<ChargeRow>(...params, Math.min(options.limit ?? 200, 500));

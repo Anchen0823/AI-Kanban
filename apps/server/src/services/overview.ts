@@ -10,7 +10,9 @@
 
 import { sumByCurrency, type Money, type QuotaFreshness } from '@aicc/core';
 import { countedObservations, listCharges, countSuspectDuplicates, type Charge } from '../db/repos/usage.js';
+import type { WorkspaceScope } from '../db/repos/workspace.js';
 import { listIntegrations, listAudit, listImportJobs } from '../db/repos/system.js';
+import { workspaceLabel } from '../db/repos/workspace.js';
 import { listProjects, listAccounts, listSubscriptions, listClients } from '../db/repos/registry.js';
 import { memoryCounters } from './memory.js';
 import { quotaBuckets } from './quota.js';
@@ -40,8 +42,8 @@ function toMoney(charge: Charge): Money {
   return { amountMinor: charge.amountMinor, currency: charge.currency };
 }
 
-export function chargeBuckets(ctx: ServiceContext): OverviewChargeBuckets {
-  const charges = listCharges(ctx.db, { includeDemo: false, limit: 500 });
+export function chargeBuckets(ctx: ServiceContext, workspace: WorkspaceScope = 'real'): OverviewChargeBuckets {
+  const charges = listCharges(ctx.db, { workspace, limit: 500 });
 
   const paid = charges.filter((c) => c.status === 'paid' && c.measurementQuality !== 'estimated');
   const pending = charges.filter((c) => c.status === 'pending');
@@ -65,6 +67,8 @@ export interface Overview {
   generatedAt: string;
   driver: string;
   dataDir: string;
+  /** 本次概览的数据来自哪个工作区。 */
+  workspace: string;
   counts: {
     projects: number;
     clients: number;
@@ -124,12 +128,12 @@ export interface Overview {
   }>;
 }
 
-export function getOverview(ctx: ServiceContext): Overview {
-  const observations = countedObservations(ctx.db);
-  const charges = listCharges(ctx.db, { includeDemo: false, limit: 500 });
-  const quota = quotaBuckets(ctx);
-  const integrations = listIntegrations(ctx.db);
-  const totals = usageTotals(ctx);
+export function getOverview(ctx: ServiceContext, workspace: WorkspaceScope = 'real'): Overview {
+  const observations = countedObservations(ctx.db, workspace);
+  const charges = listCharges(ctx.db, { workspace, limit: 500 });
+  const quota = quotaBuckets(ctx, workspace);
+  const integrations = listIntegrations(ctx.db, workspace);
+  const totals = usageTotals(ctx, workspace);
 
   const byMethod = new Map<string, number>();
   const byQuality = new Map<string, number>();
@@ -148,6 +152,14 @@ export function getOverview(ctx: ServiceContext): Overview {
   }
 
   const attention: Overview['attention'] = [];
+
+  if (workspace === 'demo') {
+    attention.push({
+      level: 'info',
+      text: '当前显示的是示例数据工作区',
+      hint: '示例数据永远不会进入真实统计数据。切回「真实数据」即可看到你自己的记录。',
+    });
+  }
 
   const unverified = integrations.filter((i) => i.capabilityStatus === 'documented');
   if (unverified.length > 0) {
@@ -173,7 +185,7 @@ export function getOverview(ctx: ServiceContext): Overview {
     });
   }
 
-  const suspect = countSuspectDuplicates(ctx.db);
+  const suspect = countSuspectDuplicates(ctx.db, workspace);
   if (suspect > 0) {
     attention.push({
       level: 'warn',
@@ -182,7 +194,7 @@ export function getOverview(ctx: ServiceContext): Overview {
     });
   }
 
-  const memCounters = memoryCounters(ctx);
+  const memCounters = memoryCounters(ctx, workspace);
   if (memCounters.pendingProposals > 0) {
     attention.push({
       level: 'info',
@@ -204,6 +216,7 @@ export function getOverview(ctx: ServiceContext): Overview {
     generatedAt: new Date(ctx.now()).toISOString(),
     driver: ctx.driver,
     dataDir: ctx.config.dataDir,
+    workspace: workspaceLabel(workspace),
     counts: {
       projects: listProjects(ctx.db).length,
       clients: listClients(ctx.db).length,
@@ -211,7 +224,7 @@ export function getOverview(ctx: ServiceContext): Overview {
       subscriptions: listSubscriptions(ctx.db).length,
       observations: observations.length,
       charges: charges.length,
-      imports: listImportJobs(ctx.db, 5).length,
+      imports: listImportJobs(ctx.db, 5, workspace).length,
     },
     tokens: {
       observed: totals.tokenValue,
@@ -219,7 +232,7 @@ export function getOverview(ctx: ServiceContext): Overview {
       coverage: totals.coverage,
       byModel: totals.byModel,
     },
-    charges: chargeBuckets(ctx),
+    charges: chargeBuckets(ctx, workspace),
     quota: {
       groups: quota.groups,
       needsAttention: quota.needsAttention,
@@ -241,14 +254,14 @@ export function getOverview(ctx: ServiceContext): Overview {
       notes: i.notes,
     })),
     attention,
-    recentAudit: listAudit(ctx.db, { limit: 15 }).map((a) => ({
+    recentAudit: listAudit(ctx.db, { limit: 15, workspace }).map((a) => ({
       at: a.at,
       action: a.action,
       entityType: a.entityType,
       entityId: a.entityId,
       result: a.result,
     })),
-    recentImports: listImportJobs(ctx.db, 8).map((j) => ({
+    recentImports: listImportJobs(ctx.db, 8, workspace).map((j) => ({
       id: j.id,
       fileName: j.fileName,
       kind: j.kind,
