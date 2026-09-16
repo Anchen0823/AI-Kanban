@@ -20,6 +20,8 @@
 | INV-13 | 上下文构建**先权限过滤再检索** | `selectContextItems` 的过滤顺序；`buildContext` 先解析授权范围 | `context.test.ts`；`reliability.test.ts` M03 |
 | INV-14 | 所有时间以 UTC 存储，展示时再转时区 | `nowIso()` 只产出 UTC ISO-8601 | 全部时间相关用例 |
 | INV-15 | 写 API 校验会话凭据 + Origin/Host + CSRF 头；凭据只存哈希 | `http/server.ts` 的 `onRequest` / `requireUser` / `requireScope` | `reliability.test.ts` R03 |
+| INV-13/M1 | MCP 是**纯代理**：权限判断只在服务端一处，传输层不复刻 | `apps/mcp/src/backend.ts` 不持有任何仓储；`tools.ts` 只做参数映射 | `mcp-e2e.test.ts` M03 路径 |
+| INV-15/M1 | Bearer 凭据调用**同样必须**带 CSRF 头，不为内部进程开口子 | `apps/mcp/src/backend.ts` 的 headers | `mcp/protocol.test.ts` 403 原样传导 |
 | INV-16 | demo 数据独立工作区：真实视图一行不出现，示例视图能看到全部且不含真实数据，可一键清空，界面持续可见标识 | `db/repos/workspace.ts` 的三态范围 + `countDemoRows` / `purgeDemoData`；前端顶栏切换 | `database.test.ts` 双向隔离用例 |
 | INV-17 | 备份前必须 `wal_checkpoint(TRUNCATE)`，备份件带 schema 版本与校验和 | `DbConnection.backupTo`；`createBackup` 写 manifest | `reliability.test.ts` R01 |
 
@@ -29,6 +31,9 @@
 
 前三条是自动化测试抓到的，第四条和第五条不是 —— 各自说明了「测试为什么没抓到」，
 因为它们都属于「写的时候看起来完全没问题」：
+
+M1 阶段又抓到四条（传输层双分发、CSRF 头、`id: 0`、float 尾巴），
+记录在 [`03-m1-scope.md`](./03-m1-scope.md) §8。
 
 ### 1. `dedupeKey` 与 `identityKey` 曾经是同一个值
 

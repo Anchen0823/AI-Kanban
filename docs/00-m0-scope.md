@@ -18,6 +18,10 @@ AI Kanban/
 │  ├─ 00-m0-scope.md                    本文
 │  ├─ 01-invariants.md                  关键不变量（可执行断言的来源）
 │  └─ 02-test-plan.md                   M0 验收测试计划与实测结果
+│
+│ （M1 起新增：03-m1-scope.md / apps/mcp / apps/server/src/collectors，
+│   见 03-m1-scope.md，本文的目录树保持 M0 当时的形状）
+│
 ├─ scripts/
 │  ├─ verify-sqlite.mjs                 SQLite 驱动最小兼容性验证
 │  ├─ smoke.mjs                         真实 HTTP 端到端冒烟（spawn 真实服务进程）
@@ -194,8 +198,8 @@ precheck ──→ running ──→ completed
 `U01 / U02 / U03 / U06 / U07 / M01 / M02 / B01 / B03 / R01` 全部通过，
 外加「成功 / 失败 / 重复输入」三类用例齐备。每个模块在测试通过后才继续。
 
-**实测结果**：core 72/72、server 60/60、类型检查 0 错误、全量构建通过、
-真实 HTTP 冒烟 24/24。B02（ChatGPT 导出包解析）与 MCP 联调不属于 M0，已在
+**M0 收尾时的实测结果**：core 72/72、server 65/65、类型检查 0 错误、全量构建通过、
+真实 HTTP 冒烟 24/24。当前整体测试结果见 [`03-m1-scope.md`](./03-m1-scope.md) §7。B02（ChatGPT 导出包解析）与 MCP 联调不属于 M0，已在
 `02-test-plan.md` 里标注为「不属于本阶段」而不是「通过」。
 
 验收测试用的是进程内注入（Fastify `inject`），它会跳过真实 socket 与 Cookie 往返，
@@ -204,12 +208,16 @@ precheck ──→ running ──→ completed
 
 ---
 
-## 6. 未实现清单（诚实边界）
+## 6. 未实现清单（M0 当时的诚实边界）
 
-以下均为设计稿中**不属于 M0**、本次**没有实现**的内容。界面与文档都不得暗示它们已可用：
+以下均为设计稿中**不属于 M0**、M0 本次**没有实现**的内容。
+其中 M1 的两条已经在这个仓库的后续提交里落地了，详见
+[`03-m1-scope.md`](./03-m1-scope.md)（含「为什么真实客户端联调仍不算完成」）：
 
-- **本地 MCP 服务**（§11.2 工具集）：M1。`api_credential` 表与 scope 校验已就位，但没有 MCP 传输层。
-- **Codex / Cursor / WorkBuddy 只读接口探测**：M1。`integration` 表中相关记录保持 `unknown` / `documented`，不预填 `verified`。
+- **本地 MCP 服务**（§11.2 工具集）：M0 时 `api_credential` 表与 scope 校验已就位，没有 MCP 传输层。
+  → **M1 已实现**（`apps/mcp`）。
+- **Codex / Cursor / WorkBuddy 只读接口探测**：M0 时 `integration` 表中相关记录保持 `unknown` / `documented`。
+  → **M1 部分实现**：Codex 用量只读探测已落地；Cursor / WorkBuddy 仍未做。**真实客户端联调未完成。**
 - **ChatGPT 导出包（`conversations.json`）解析**：M2。M0 只支持用户自己粘贴文本。
 - **内置 AI 提炼**：不属于 M0。用户可在现有客户端生成候选，再粘贴进收集箱。
 - **LiteLLM / Langfuse / 向量检索 / 远程网关**：M3，且需要真实需求触发。

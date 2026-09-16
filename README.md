@@ -5,11 +5,15 @@
 它解决的问题是：你在 ChatGPT、Codex、Cursor、WorkBuddy 之间来回切换时，
 用量、额度、项目状态和个人偏好各自留在不同客户端里，彼此之间无法交接。
 
-本仓库当前实现的是设计稿的 **M0（先把业务闭环跑起来）**：
-登记 / 用量导入与去重 / 额度快照 / 记忆候选审核与版本 / 上下文包导出 / 备份恢复。
+本仓库当前实现到设计稿 §16 的 **M1**，分两段看：
+
+- **M0 已交付**：登记 / 用量导入与去重 / 额度快照 / 记忆候选审核与版本 / 上下文包导出 / 备份恢复。
+- **M1 已交付的部分**：本地 MCP 传输层（`apps/mcp`，六个工具全通）、Codex 用量接口只读探测、
+  以及客户端 / 账户 / 订阅的登记界面。
+  **尚未交付**：在真实 Codex / Cursor / WorkBuddy 客户端里的联调。详见 §6.1。
 
 设计原文见 [`AI-Control-Center-Design-v0.1.md`](./AI-Control-Center-Design-v0.1.md)，
-实施设计见 [`docs/00-m0-scope.md`](./docs/00-m0-scope.md)。
+实施设计见 [`docs/00-m0-scope.md`](./docs/00-m0-scope.md) 与 [`docs/03-m1-scope.md`](./docs/03-m1-scope.md)。
 
 ---
 
@@ -35,6 +39,27 @@ npm start              # 启动服务
 > 你打开的任何一个网页都能向 localhost 发请求。所以启动时打印一次性配对码，
 > 配对成功后该码立即更换。
 
+### 把 MCP 挂到你的客户端
+
+服务端是一个 stdio 进程，构建产物入口在 `apps/mcp/dist/index.js`。
+它需要两样东西才能工作：**工作台服务正在运行**，以及**一个复用凭据**（在
+「设置与连接 → 代理凭据」里签发，明文只显示一次）。
+
+环境变量只有两个（`AICC_API_URL` 默认就是 `http://127.0.0.1:8787`）：
+
+```bash
+AICC_TOKEN=<你的凭据> node apps/mcp/dist/index.js
+```
+
+启动后它在 stderr 上打印工作台地址与凭据状态 —— **stdout 是协议通道**，
+往那里打一行日志就会让客户端反序列化失败，所以所有诊断信息都走 stderr。
+
+> 这一步目前**还没有在任何真实客户端里跑过**。
+> 传输层与六个工具都有端到端测试，但「在你的 Codex / Cursor 里真正能用」
+> 需要你挂上去试一次（详见 `docs/03-m1-scope.md` §6.1）。
+> 已知坑：codex 的 `config.toml` 里若有 `service_tier="default"`，0.130.0 会判整个配置无效
+> 并放弃读取它 —— 于是写进去的 MCP 项也不会生效。
+
 ### 开发模式
 
 ```bash
@@ -45,7 +70,7 @@ npm run dev            # 同时启动 API(8787) 与 Vite(5173)
 
 ```bash
 npm run verify:sqlite  # SQLite 驱动最小兼容性验证
-npm test               # core + server 全部测试（当前 137 项）
+npm test               # core + server + mcp 全部测试（当前 179 项）
 npm run typecheck
 npm run verify:smoke   # 真实 HTTP 端到端冒烟（会真的启动服务进程）
 ```
@@ -104,18 +129,22 @@ AICC_PORT=8788 npm start        # PowerShell: $env:AICC_PORT=8788; npm start
 
 ---
 
-## 它不做什么（M0 边界）
+## 它不做什么
 
-以下都是设计稿里的后续阶段，**本版本没有实现**，界面上也如实标注为不可用：
+以下都是设计稿里的后续阶段，**当前版本没有实现**，界面上也如实标注为不可用：
 
 | 未实现 | 计划阶段 |
 |---|---|
-| 本地 MCP 传输层（stdio server） | M1（凭据模型与项目范围隔离已完成） |
-| Codex / Cursor / WorkBuddy 只读接口探测 | M1 |
+| 在真实 Codex / Cursor / WorkBuddy 客户端里挂载本 MCP 并联调 | M1 剩最后一步（服务端已就绪，需你在自己机器上配一次） |
+| Cursor 用量 / 费用探测 | M1 未完成 |
 | ChatGPT 导出包（`conversations.json`）解析 | M2 |
-| 内置 AI 提炼（本版本请在你现有的客户端里生成候选再粘贴进来） | 不在 M0 |
+| 内置 AI 提炼（请在你现有的客户端里生成候选再粘贴进来） | 不在 M0 / M1 |
 | LiteLLM / Langfuse / 向量检索 / 远程网关 | M3 |
 | 多用户与权限系统 | 不做。这是本地单用户工具 |
+
+> **「内部能重复」不等于「外部已验证」。** MCP 服务有端到端测试、能被外部进程
+> 真的调用并通过授权隔离检查，但只要没在你的真实客户端里挂过一次，
+> 「能力登记」页里那一项就仍然是 `documented`（官方文档描述支持），不会自己变成「已同步」。
 
 另外：不抓 Cookie、不调私有网页接口、不把订阅迁移到收费 API、
 不把未知 token 填 0、不给代理凭据审批或删除权限、
@@ -128,15 +157,18 @@ AICC_PORT=8788 npm start        # PowerShell: $env:AICC_PORT=8788; npm start
 ```
 ├─ AI-Control-Center-Design-v0.1.md   原始设计稿
 ├─ docs/
-│  ├─ 00-m0-scope.md                  目录结构 / 数据实体 / 状态迁移 / 未实现清单
+│  ├─ 00-m0-scope.md                  目录结构 / 数据实体 / 状态迁移 / M0 未实现清单
 │  ├─ 01-invariants.md                关键不变量（可执行断言的来源）
-│  └─ 02-test-plan.md                 验收测试计划与实测结果
+│  ├─ 02-test-plan.md                 M0 验收测试计划与实测结果
+│  └─ 03-m1-scope.md                  M1：本地 MCP 传输层与 Codex 只读探测
 ├─ scripts/
 │  ├─ verify-sqlite.mjs               SQLite 驱动最小兼容性验证
 │  ├─ smoke.mjs                       真实 HTTP 端到端冒烟
 │  └─ dev.mjs                         零依赖的并行开发脚本
 ├─ packages/core/                     无 I/O 的领域逻辑（前后端共用）
 ├─ apps/server/                       本地单体服务（Fastify + SQLite）
+│  └─ src/collectors/                 外部只读采集适配器（Codex app-server）
+├─ apps/mcp/                          本地 stdio MCP 服务（纯转发，无业务判断）
 └─ apps/web/                          React 工作台
 ```
 

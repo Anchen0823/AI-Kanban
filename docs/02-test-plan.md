@@ -2,6 +2,10 @@
 
 本文记录**实际执行过**的验证，不是计划中的验证。
 
+> **时间范围：** 本文冻结在 M0 收尾时点（server 65 项）。后续 M1 新增的用例与实测结果
+> 记录在 [`03-m1-scope.md`](./03-m1-scope.md) §7 —— 那份表里的数字是最新的一次全量跑通，
+> 覆盖本文的全部用例。两份对不上时以 `03-m1-scope.md` 为准。
+
 执行环境：Windows 11 / Node v22.22.2 / npm 10.9.7 / TypeScript 7.0.2 /
 SQLite 驱动 `node:sqlite`（Node 内置）/ Fastify 5.12.5 / zod 4.6.5 / React 19.3.0 / Vite 8.3.0。
 
@@ -23,7 +27,7 @@ npm run verify:smoke      # 真实 HTTP 端到端冒烟（会真的启动服务�
 |---|---|---|
 | SQLite 驱动兼容性 | `verify:sqlite` | **通过**：驱动 `node:sqlite`；WAL、事务回滚、唯一约束、`wal_checkpoint(TRUNCATE)`、热备份、关闭全部 OK |
 | core 单元测试 | `npm test -w @aicc/core` | **72 / 72 通过** |
-| server 验收测试 | `npm test -w @aicc/server` | **65 / 65 通过** |
+| server 验收测试 | `npm test -w @aicc/server` | **65 / 65 通过**（M0 收尾时；M1 后为 85 项全通过） |
 | 类型检查 | `npm run typecheck` | **0 错误**（三个包） |
 | 全量构建 | `npm run build` | **通过**（web 产物 index.js 450 KB / gzip 132 KB） |
 | 真实 HTTP 冒烟 | `verify:smoke` | **24 / 24 通过** |
@@ -142,8 +146,10 @@ Node 22 内置的 `node:sqlite`。它的 `DatabaseSync` 是同步 API，`exec` /
 
 ### 4.3 没做的事
 
-- 没有在真实的 Codex / Cursor / WorkBuddy / ChatGPT 账户上验证任何接口 —— 那是 M1 的工作，
-  且必须逐账户逐客户端实测。本版本所有集成的能力状态保持 `documented` 或 `unknown`。
 - 没有做性能基准。设计稿 §15 提到「10,000 条记忆 + 100,000 条用量观测，列表与搜索 p95 < 500 ms」，
-  这是**待测目标**，本文不声称达到。
+  这是**待测目标**，本文不声称达到。M1 也仍未做。
+
+> **更新（M1 之后）：** 上面那条「没有在真实外部接口上验证」已经部分改变 ——
+> Codex 用量接口做了真实只读探测（有实测结论，包括确认 `account/usage/read` 在 0.130.0 上不存在）。
+> 但**真实客户端挂载 MCP 并联调仍然没做**，详见 [`03-m1-scope.md`](./03-m1-scope.md) §6.1。
 - `getRevision` 与 `listQuotaHistory` 目前只有仓储层实现，没有独立的 HTTP 用例覆盖。
