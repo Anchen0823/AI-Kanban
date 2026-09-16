@@ -26,6 +26,7 @@ exports/
 .env-probe.txt
 .core-test.txt
 .server-test.txt
+.web-test.txt
 logs/
 *.log
 tmp/
