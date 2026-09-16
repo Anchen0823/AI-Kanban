@@ -1,0 +1,45 @@
+# --- 依赖 ---
+node_modules/
+.npm/
+.pnpm-store/
+
+# --- 构建产物 ---
+dist/
+build/
+*.tsbuildinfo
+.vite/
+
+# --- 本地运行数据（真实数据目录，绝不入库） ---
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+backups/
+exports/
+*.env
+.env
+.env.local
+.env.*.local
+
+# --- 探针与临时文件 ---
+.env-probe.txt
+.core-test.txt
+.server-test.txt
+logs/
+*.log
+tmp/
+.tmp/
+
+# --- 编辑器 / 系统 ---
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- 安全：任何凭据、导出的真实记忆包 ---
+*.pem
+*.key
+credentials.json
