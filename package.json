@@ -15,9 +15,9 @@
     "dev": "node scripts/dev.mjs",
     "dev:server": "npm run dev -w @aicc/server",
     "dev:web": "npm run dev -w @aicc/web",
-    "build": "npm run build -w @aicc/core && npm run build -w @aicc/server && npm run build -w @aicc/web",
-    "typecheck": "npm run typecheck -w @aicc/core && npm run typecheck -w @aicc/server && npm run typecheck -w @aicc/web",
-    "test": "npm run test -w @aicc/core && npm run test -w @aicc/server",
+    "build": "npm run build -w @aicc/core && npm run build -w @aicc/server && npm run build -w @aicc/mcp && npm run build -w @aicc/web",
+    "typecheck": "npm run typecheck -w @aicc/core && npm run typecheck -w @aicc/server && npm run typecheck -w @aicc/mcp && npm run typecheck -w @aicc/web",
+    "test": "npm run test -w @aicc/core && npm run test -w @aicc/server && npm run test -w @aicc/mcp",
     "start": "npm run start -w @aicc/server",
     "verify:sqlite": "node scripts/verify-sqlite.mjs",
     "verify:smoke": "node scripts/smoke.mjs"

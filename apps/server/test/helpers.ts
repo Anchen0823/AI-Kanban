@@ -184,3 +184,17 @@ export async function importCsv(
   });
   return { status: res.status, body: res.body as Record<string, unknown> };
 }
+
+/**
+ * 让脚手架真的监听一个随机端口，返回可被外部进程访问的地址。
+ *
+ * 进程内 `inject` 到不了「另一个进程通过 TCP 调本服务」这条路径 ——
+ * MCP 子进程正属于这种情况，所以那些测试必须走真实 socket。
+ * 监听之后 `inject` 依然可用，两种调用方式可以混用。
+ */
+export async function listenForRealHttp(h: TestHarness): Promise<string> {
+  const address = await h.fastify.listen({ host: '127.0.0.1', port: 0 });
+  // Fastify 在 IPv6 环境下可能返回 [::1]，MCP 侧要用 MCP 自己的 Host 头校验逻辑，
+  // 统一成 127.0.0.1 更贴近真实启动时的形态。
+  return address.replace('[::1]', '127.0.0.1');
+}

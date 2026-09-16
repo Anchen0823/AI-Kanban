@@ -308,10 +308,17 @@ export function registerAgentRoutes(fastify: FastifyInstance, deps: HttpDeps): v
       projects: listProjects(app.db)
         .filter((p) => scope === null || scope.includes(p.id))
         .map((p) => ({ id: p.id, title: p.title, status: p.status })),
-      mcp_transport_available: false,
+      mcp_transport_available: true,
+      mcp_transport: {
+        /** 传输方式与入口，便于客户端自检时核对。 */
+        transport: 'stdio',
+        package: '@aicc/mcp',
+        tool_count: 6,
+      },
       note:
-        'MCP 传输层属于 M1，此处只提供与服务端一致的能力视图。capability_status 为 documented ' +
-        '表示「官方文档说支持」，不等于本机已验证。',
+        'MCP 传输层（stdio）已在 M1 实现：在客户端里把 @aicc/mcp 作为命令启动，' +
+        '用环境变量 AICC_API_URL / AICC_TOKEN 指向本服务与一份代理凭据即可。' +
+        'capability_status 为 documented 只表示「官方文档说支持」，不等于本机已验证。',
     };
   });
 }
