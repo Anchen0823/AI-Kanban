@@ -13,16 +13,19 @@
 ```text
 AI Kanban/
 ├─ AI-Control-Center-Design-v0.1.md     原始设计稿（未改动）
+├─ README.md                            怎么跑起来、怎么算账、不做什么
 ├─ docs/
 │  ├─ 00-m0-scope.md                    本文
 │  ├─ 01-invariants.md                  关键不变量（可执行断言的来源）
-│  └─ 02-test-plan.md                   M0 验收测试计划与结果
+│  └─ 02-test-plan.md                   M0 验收测试计划与实测结果
 ├─ scripts/
 │  ├─ verify-sqlite.mjs                 SQLite 驱动最小兼容性验证
+│  ├─ smoke.mjs                         真实 HTTP 端到端冒烟（spawn 真实服务进程）
 │  └─ dev.mjs                           并行启动 server + web（零额外依赖）
 ├─ packages/core/                       @aicc/core —— 无 I/O 的领域逻辑
 │  ├─ src/enums.ts                      枚举：采集方式、质量、范围、类型、状态
-│  ├─ src/ids.ts                        ID 与内容指纹
+│  ├─ src/ids.ts                        ID、稳定 JSON、内容指纹
+│  ├─ src/sha256.ts                     纯 TS 的 SHA-256（使 core 可同构复用）
 │  ├─ src/money.ts                      定点金额（字符串主单位 + 币种）
 │  ├─ src/tokens.ts                     Token 归一化（含子集语义）
 │  ├─ src/dedupe.ts                     幂等键与跨来源身份键
@@ -30,16 +33,17 @@ AI Kanban/
 │  ├─ src/memory.ts                     记忆生命周期与版本冲突
 │  ├─ src/context.ts                    上下文包预算与清单
 │  ├─ src/schemas.ts                    zod 请求/响应校验
-│  └─ test/*.test.ts                    纯逻辑单测
+│  └─ test/*.test.ts                    纯逻辑单测（72 项）
 ├─ apps/server/                         @aicc/server —— 本地单体服务
-│  ├─ src/db/driver.ts                  SQLite 驱动适配（node:sqlite / better-sqlite3）
-│  ├─ src/db/migrations/001_init.sql    建表与约束
-│  ├─ src/db/migrate.ts                 迁移执行器
+│  ├─ src/config.ts                     配置与「拒绝非回环绑定」
+│  ├─ src/app.ts                        组合根：数据库生命周期 + 恢复备份
+│  ├─ src/db/database.ts                SQLite 驱动适配、迁移、可重入事务
+│  ├─ src/db/schema.ts                  建表与约束（迁移内联，构建后不需要拷资源）
 │  ├─ src/db/repos/*.ts                 各实体仓储
 │  ├─ src/services/*.ts                 用量、额度、记忆、上下文、备份、审计、demo
-│  ├─ src/imports/*.ts                  CSV / JSON 导入与安全守卫
-│  ├─ src/http/*.ts                     Fastify 装配、鉴权、错误结构、路由
-│  └─ test/*.test.ts                    验收测试
+│  ├─ src/imports/*.ts                  CSV / JSON 解析与列映射 + 安全守卫
+│  ├─ src/http/                         鉴权、错误结构、路由（含代理接口契约）
+│  └─ test/*.test.ts                    验收测试（60 项）
 └─ apps/web/                            @aicc/web —— React 工作台
    └─ src/pages/*.tsx                   概览 / 用量 / 记忆 / 项目 / 桥接 / 设置
 ```
@@ -131,8 +135,15 @@ Node 内置测试运行器。**没有引入 LiteLLM、Langfuse、向量库、消
 pending ──approve──→ approved
    │
    ├──reject──→ rejected
-   └──base_version 不符──→ conflict ──重新提交──→ pending
+   └──base_version 不符 / 缺 base_version──→ conflict（终态）
+                                              需基于新版本重新提交一份提案
 ```
+
+`conflict` 是终态，不是「待重试」。基线已经变了，这份提案里的差异必须重新对照，
+不能「顺手修好」。用户要基于当前版本新建一份提案。
+
+错误码细分到具体原因（`base_version_required` / `base_version_mismatch` / `target_missing`），
+都返回 409 —— 让调用方知道「不是你参数写错了，是当前状态变了」。
 
 ### 3.3 导入批次
 
@@ -182,6 +193,14 @@ precheck ──→ running ──→ completed
 见 `docs/02-test-plan.md`。M0 退出条件为设计稿 §16 列出的
 `U01 / U02 / U03 / U06 / U07 / M01 / M02 / B01 / B03 / R01` 全部通过，
 外加「成功 / 失败 / 重复输入」三类用例齐备。每个模块在测试通过后才继续。
+
+**实测结果**：core 72/72、server 60/60、类型检查 0 错误、全量构建通过、
+真实 HTTP 冒烟 24/24。B02（ChatGPT 导出包解析）与 MCP 联调不属于 M0，已在
+`02-test-plan.md` 里标注为「不属于本阶段」而不是「通过」。
+
+验收测试用的是进程内注入（Fastify `inject`），它会跳过真实 socket 与 Cookie 往返，
+所以额外有一个 `npm run verify:smoke` 会**真的启动服务进程**再跑一遍关键路径。
+这个脚本抓到了两个进程内测试没覆盖到的缺陷（空 JSON 请求体、事务不可重入）。
 
 ---
 

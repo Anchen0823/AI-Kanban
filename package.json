@@ -19,7 +19,8 @@
     "typecheck": "npm run typecheck -w @aicc/core && npm run typecheck -w @aicc/server && npm run typecheck -w @aicc/web",
     "test": "npm run test -w @aicc/core && npm run test -w @aicc/server",
     "start": "npm run start -w @aicc/server",
-    "verify:sqlite": "node scripts/verify-sqlite.mjs"
+    "verify:sqlite": "node scripts/verify-sqlite.mjs",
+    "verify:smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
