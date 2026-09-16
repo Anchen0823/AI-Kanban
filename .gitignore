@@ -34,6 +34,9 @@ scripts/.*
 .core-test.txt
 .server-test.txt
 .web-test.txt
+# 探针产物目录：由 `codex app-server generate-json-schema` 生成，可随时重新导出。
+.probe-codex/
+.m1.txt
 logs/
 *.log
 tmp/

@@ -65,6 +65,8 @@ export function testConfig(dir: string, overrides: Partial<AppConfig> = {}): App
     maxBodyBytes: DEFAULTS.maxBodyBytes,
     maxImportBytes: DEFAULTS.maxImportBytes,
     maxImportRows: DEFAULTS.maxImportRows,
+    // 指到一个必然不存在的可执行文件：测试里绝不该意外启动真的 Codex。
+    codexCommand: 'aicc-test-no-such-codex',
     ...overrides,
   };
 }

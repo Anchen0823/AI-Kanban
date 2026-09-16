@@ -389,6 +389,13 @@ export const zCreateCredential = z.object({
 export const zProbeIntegrationInput = z.object({
   /** 只读探测的说明由用户填写；不做任何写操作。 */
   note: z.string().max(1000).nullable().optional(),
+  /**
+   * 探测拿到额度快照时归属到哪个计费账户。
+   *
+   * 必填与否取决于探测结果：拿不到快照时不需要账户。所以这里可空，
+   * 由服务端在「确实要落库」时再校验 —— 而不是在入口就要求一个可能用不上的值。
+   */
+  accountId: zId.nullable().optional(),
 });
 
 export const zRestoreInput = z.object({

@@ -14,10 +14,13 @@ import { newId, newToken, zCreateCredential, zProbeIntegrationInput } from '@aic
 import { audit, readAudit } from '../../services/audit.js';
 import { deleteBackup, listBackups } from '../../services/backup.js';
 import { demoStatus, resetDemo, seedDemo } from '../../services/demo.js';
+import { CODEX_ADAPTER_ID, CODEX_ADAPTER_VERSION, probeCodex } from '../../collectors/codex-usage.js';
+import { storeProbeQuotaSnapshots } from '../../services/integration-probe.js';
 import { SCHEMA_VERSION } from '../../db/database.js';
 import { getClient, listClients } from '../../db/repos/registry.js';
 import {
   databaseCounts,
+  getIntegration,
   insertCredential,
   listCredentials,
   listIntegrations,
@@ -295,11 +298,67 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(request.params);
     const input = zProbeIntegrationInput.parse(request.body ?? {});
 
+    // M1：Codex 这一条真的去探测。
+    //
+    // 注意它是**只读**的：只尝试 account/read、account/usage/read、account/rateLimits/read
+    // 三个查询方法，不触碰任何充值 / 重置 / 发信类方法（§3.2）。进程用完即关，
+    // 不与用户正在用的 Codex 抢状态。前两个里 account/usage/read 只是「确认它存不存在」——
+    // 实测来看 codex 0.130.0 没有这个方法，探测会如实记为 unsupported 而不是猜一个等价实现。
+    if (id === 'itg_codex_usage') {
+      const probe = await probeCodex({ command: ctx.config.codexCommand });
+      const before = getIntegration(app.db, id);
+
+      const updated = recordProbe(app.db, id, {
+        capabilityStatus: probe.report.status,
+        // 探测结论写在 probe 键下，不摊平进顶层 —— 这样种子的描述字段
+        // （implemented / milestone / method_notes …）在下次启动刷新时不会被弄丢。
+        capabilityDetail: {
+          ...(before?.capabilityDetail ?? {}),
+          probe: probe.report.detail,
+        },
+        evidence: probe.report.evidence,
+        clientVersion: probe.report.clientVersion,
+        note: input.note?.trim() ? `${probe.report.notes}\n\n用户备注：${input.note.trim()}` : probe.report.notes,
+      });
+
+      // 只有真的拿到快照才需要账户；没给账户就不落库并如实说明。
+      const store = storeProbeQuotaSnapshots(ctx, input.accountId ?? null, probe.quotaSnapshots, CODEX_ADAPTER_VERSION);
+      const storedSnapshots = store.stored;
+
+      audit(ctx, {
+        action: 'integration.probe',
+        entityType: 'integration',
+        entityId: id,
+        result: probe.report.status === 'verified' ? 'ok' : 'rejected',
+        detail: {
+          adapter: CODEX_ADAPTER_ID,
+          adapterVersion: CODEX_ADAPTER_VERSION,
+          clientVersion: probe.report.clientVersion,
+          capabilityStatus: probe.report.status,
+          reasonCode: (probe.report.detail as { reason_code?: unknown }).reason_code ?? null,
+          storedSnapshots,
+        },
+      });
+
+      return {
+        integration: updated,
+        probeExecuted: true,
+        adapter: { id: CODEX_ADAPTER_ID, version: CODEX_ADAPTER_VERSION },
+        capabilityStatus: probe.report.status,
+        clientVersion: probe.report.clientVersion,
+        evidence: probe.report.evidence,
+        quotaBucketsFound: probe.quotaSnapshots.length,
+        storedSnapshots,
+        warnings: [...probe.warnings, ...store.warnings],
+        note: probe.report.status === 'verified' ? '已实测通过，证据已写入连接记录。' : probe.report.notes,
+      };
+    }
+
     const updated = recordProbe(app.db, id, {
       capabilityStatus: 'unknown',
       note:
         (input.note ?? '').trim() ||
-        'M0 不执行任何外部探测。此处只登记「尚未验证」，不把状态改成 verified，也不凭空设计供应商接口。',
+        '这条连接还没有实现探测适配器。此处只登记「尚未验证」，不把状态改成 verified，也不凭空设计供应商接口。',
       evidence: null,
     });
 
@@ -308,15 +367,16 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
       entityType: 'integration',
       entityId: id,
       result: 'rejected',
-      detail: { reason: 'not_implemented_in_m0' },
+      detail: { reason: 'no_adapter_for_integration' },
     });
 
     return {
       integration: updated,
       probeExecuted: false,
+      capabilityStatus: 'unknown',
       note:
-        '只读探测属于 M1。本接口记录「本次未验证」这一事实，不会把能力状态改成「已验证」——' +
-        '因为那会让界面显示一个我们没有证据的结论。',
+        '这条连接还没有探测适配器（M1 只实现了 Codex 用量接口）。本接口记录「本次未验证」这一事实，' +
+        '不会把能力状态改成「已验证」—— 因为那会让界面显示一个我们没有证据的结论。',
     };
   });
 

@@ -35,6 +35,13 @@ export interface AppConfig {
   maxImportBytes: number;
   /** 预检里的行数上限，防止一次导入把界面卡死。 */
   maxImportRows: number;
+  /**
+   * Codex CLI 的命令名或完整路径。
+   *
+   * 做成可配置的原因有两个：codex 未必在 PATH 上（常见于用包管理器装的场景），
+   * 以及测试需要指向一个受控的可执行文件。它不是「探测开关」—— 探测由用户按下按钮触发。
+   */
+  codexCommand: string;
 }
 
 export const DEFAULTS = {
@@ -96,6 +103,7 @@ export function loadConfig(): AppConfig {
     maxBodyBytes: DEFAULTS.maxBodyBytes,
     maxImportBytes: DEFAULTS.maxImportBytes,
     maxImportRows: DEFAULTS.maxImportRows,
+    codexCommand: env('AICC_CODEX_COMMAND') ?? 'codex',
   };
 }
 

@@ -359,6 +359,43 @@ export function listIntegrations(db: DbConnection, workspace: WorkspaceScope = '
  * §3.1 要求界面区分「官方文档描述支持」与「本机已验证」，所以写 verified
  * 必须同时给出 evidence。
  */
+/**
+ * 刷新种子里的**描述性**字段。
+ *
+ * 存在的理由：种子里的文字是有保质期的产品事实（「MCP 传输层未实现」在某次发版后
+ * 就不再成立）。如果只在首次启动时写一次，老库的界面上就会长期停留一句错误的陈述 ——
+ * 而「界面上的话必须是真的」是这个项目最在意的东西之一。
+ *
+ * 边界很清楚：只改 transport / auth_mode / env_requirement / notes / capability_detail，
+ * **不动** capability_status、verified_at、evidence。那三个是探测结果的领地，
+ * 由 recordProbe 负责，种子不许替它下结论。
+ */
+export function refreshIntegrationSeed(
+  db: DbConnection,
+  id: string,
+  patch: {
+    transport: string;
+    authMode: string;
+    capabilityDetail: Record<string, unknown>;
+    envRequirement: string | null;
+    notes: string;
+  },
+): void {
+  db.prepare(
+    `UPDATE integration SET transport = ?, auth_mode = ?, capability_detail = ?,
+       env_requirement = ?, notes = ?, updated_at = ?
+     WHERE id = ?`,
+  ).run(
+    patch.transport,
+    patch.authMode,
+    JSON.stringify(patch.capabilityDetail),
+    patch.envRequirement,
+    patch.notes,
+    nowIso(),
+    id,
+  );
+}
+
 export function recordProbe(
   db: DbConnection,
   id: string,
