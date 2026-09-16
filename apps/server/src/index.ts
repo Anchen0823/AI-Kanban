@@ -2,8 +2,11 @@
  * 服务入口。
  *
  * 启动顺序刻意如此：先断言绑定地址是回环地址（拒绝把本地服务暴露到局域网），
- * 再打开数据库并跑迁移，然后打印配对码 —— 因为配对码是访问界面的唯一入口，
- * 必须在 http 开始监听之前就让用户看得到。
+ * 再确认端口可用，然后打开数据库并跑迁移，最后才监听并打印配对码 ——
+ * 每一步都保证「失败时不会留下半开的资源」。
+ *
+ * 端口检查放在开库之前是有意的：端口被占是最常见的一类启动失败，而它跟数据库
+ * 毫无关系。先探端口，用户就不用为一个必然会失败的启动白白等一轮迁移。
  */
 
 import { assertLoopbackHost, loadConfig } from './config.js';
@@ -12,12 +15,20 @@ import { SessionStore } from './http/auth.js';
 import { buildServer } from './http/server.js';
 import { DEFAULTS } from './config.js';
 import { setSetting, getSetting } from './db/repos/system.js';
+import { PortInUseError, assertPortAvailable, portInUseHint } from './net/port.js';
+
+/** 供顶层错误处理使用：启动过程中已经拿到的资源要能在这里释放。 */
+let openedApp: ReturnType<typeof createApp> | null = null;
+let activeConfig: ReturnType<typeof loadConfig> | null = null;
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  activeConfig = config;
   assertLoopbackHost(config.host);
+  await assertPortAvailable(config.host, config.port);
 
   const app = createApp(config);
+  openedApp = app;
   const info = app.bootstrap();
 
   // 把「导入上限」等安全参数固化进设置，让界面能如实展示当前生效值
@@ -81,7 +92,35 @@ function printBanner(
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 
+/**
+ * 把「端口被占」从各种可能的抛出点归一到一个类型。
+ *
+ * 预检已经挡掉了绝大多数情况，但预检释放端口到 `fastify.listen()` 真正绑定之间
+ * 存在一个极短的空窗（另一个进程可能恰好在这个瞬间抢进去）。这里作为兜底，
+ * 保证用户看到的仍是同一个可读提示，而不是 `listen EADDRINUSE` 堆栈。
+ */
+function asPortInUse(err: unknown): PortInUseError | null {
+  if (err instanceof PortInUseError) return err;
+  if (err !== null && typeof err === 'object' && (err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+    return new PortInUseError(activeConfig?.host ?? '127.0.0.1', activeConfig?.port ?? 8787);
+  }
+  return null;
+}
+
 main().catch((err: unknown) => {
-  process.stderr.write(`\n启动失败：${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
+  const portIssue = asPortInUse(err);
+  if (portIssue) {
+    process.stderr.write(portInUseHint(portIssue.host, portIssue.port));
+  } else {
+    process.stderr.write(`\n启动失败：${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
+  }
+
+  try {
+    // 已打开的数据库要关掉，否则 WAL 文件会留在磁盘上，下一次启动看不到原因。
+    openedApp?.close();
+  } catch {
+    // 关闭本身失败时不要让原始错误被覆盖
+  }
+
   process.exit(1);
 });
