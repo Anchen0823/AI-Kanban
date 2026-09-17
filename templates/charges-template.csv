@@ -1,0 +1,2 @@
+﻿occurred_at,amount,currency,kind,status,billing_ref,period_start,period_end,note
+2026-09-01,20.00,USD,subscription,paid,inv-2026-09,2026-09-01,2026-09-30,ChatGPT Plus 月费

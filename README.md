@@ -19,6 +19,9 @@
 
 ## 快速开始
 
+> **不知道从哪下手？** 直接看 [`docs/04-how-to-use.md`](./docs/04-how-to-use.md)——
+> 那份文档只回答「第一步做什么、第二步做什么」，不含设计动机。
+
 需要 **Node ≥ 22.5**（用到内置的 `node:sqlite`）。
 
 ```bash
@@ -160,7 +163,8 @@ AICC_PORT=8788 npm start        # PowerShell: $env:AICC_PORT=8788; npm start
 │  ├─ 00-m0-scope.md                  目录结构 / 数据实体 / 状态迁移 / M0 未实现清单
 │  ├─ 01-invariants.md                关键不变量（可执行断言的来源）
 │  ├─ 02-test-plan.md                 M0 验收测试计划与实测结果
-│  └─ 03-m1-scope.md                  M1：本地 MCP 传输层与 Codex 只读探测
+│  ├─ 03-m1-scope.md                  M1：本地 MCP 传输层与 Codex 只读探测
+│  └─ 04-how-to-use.md                上手指南：第一步做什么、第二步做什么
 ├─ scripts/
 │  ├─ verify-sqlite.mjs               SQLite 驱动最小兼容性验证
 │  ├─ smoke.mjs                       真实 HTTP 端到端冒烟
@@ -197,6 +201,7 @@ AICC_PORT=8788 npm start        # PowerShell: $env:AICC_PORT=8788; npm start
 | `AICC_DATA_DIR` | `./data` | 数据目录 |
 | `AICC_TZ` | `Asia/Shanghai` | 展示时区（存储一律 UTC） |
 | `AICC_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 允许调用写接口的来源 |
+| `AICC_CODEX_COMMAND` | `codex` | Codex 探针调用的命令名（不在 PATH 时填完整路径） |
 
 ---
 
