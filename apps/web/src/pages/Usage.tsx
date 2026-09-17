@@ -970,6 +970,30 @@ function QuotaPanel({
 /* 导入                                                                */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 导入结果的一句话总结。
+ *
+ * 这里不能只报「新增 / 重放」两个数：实测证明**重复导入同一个带 request_id 的 CSV
+ * 走的是 evidence 而不是 replay**，只报那两个数会得到「新增 0 行，重放 0 行」，
+ * 用户会以为导入失败。所以哪个计数非零就说哪个。
+ */
+function importSummary(r: ImportOutcome): string {
+  const parts: string[] = [`新增 ${r.acceptedRows} 行`];
+  if (r.replayedRows > 0) parts.push(`完全一致跳过 ${r.replayedRows} 行`);
+  if (r.evidenceRows > 0) parts.push(`重复来源留证 ${r.evidenceRows} 行`);
+  if (r.suspectRows > 0) parts.push(`待确认 ${r.suspectRows} 行`);
+  if (r.rejectedRows > 0) parts.push(`拒绝 ${r.rejectedRows} 行`);
+
+  const summary = parts.join('，');
+  if (r.acceptedRows > 0) return `导入完成：${summary}。`;
+
+  const deduped = r.replayedRows + r.evidenceRows + r.suspectRows;
+  if (deduped > 0) {
+    return `没有新增数据：${summary}。这些内容此前已经入库，token 与金额不会翻倍。`;
+  }
+  return `导入没有产生任何记录：${summary}。`;
+}
+
 function ImportPanel({
   accounts,
   projects,
@@ -1014,7 +1038,7 @@ function ImportPanel({
       });
       setOutcome(result);
       if (!dryRun) {
-        toast(`导入完成：新增 ${result.acceptedRows} 行，重放 ${result.replayedRows} 行。`, 'ok');
+        toast(importSummary(result), result.acceptedRows > 0 ? 'ok' : 'warn');
         await onImported();
       } else {
         toast('预检完成，没有写入任何数据。', 'info');
@@ -1183,11 +1207,11 @@ function ImportPanel({
               <span className="metric-value small">{outcome.acceptedRows}</span>
             </div>
             <div className="metric">
-              <span className="metric-label">重放（同一文件重复导入）</span>
+              <span className="metric-label">完全一致已跳过</span>
               <span className="metric-value small faint">{outcome.replayedRows}</span>
             </div>
             <div className="metric">
-              <span className="metric-label">同一请求的其他来源</span>
+              <span className="metric-label">重复来源留证（不计入）</span>
               <span className="metric-value small">{outcome.evidenceRows}</span>
             </div>
             <div className="metric">
@@ -1206,7 +1230,8 @@ function ImportPanel({
               <Alert tone="warn" title="这个文件此前已经导入过">
                 <span>
                   上次导入于 {formatDateTime(outcome.previousImport.finishedAt)}，当时新增了{' '}
-                  {outcome.previousImport.acceptedRows} 行。本次重复的行会被判为重放，不会让数字翻倍。
+                  {outcome.previousImport.acceptedRows} 行。重复的行<strong>不会让数字翻倍</strong>：
+                  内容完全一致的直接跳过，命中同一 request_id 的留作证据但不计入统计。
                 </span>
               </Alert>
             </>

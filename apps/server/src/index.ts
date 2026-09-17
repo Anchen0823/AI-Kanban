@@ -71,7 +71,7 @@ function printBanner(
   };
   const lines = [
     '',
-    `${c.bold}AI Control Center${c.reset} ${c.dim}M0 · 本地单用户闭环${c.reset}`,
+    `${c.bold}AI Control Center${c.reset} ${c.dim}M1 · 本地单用户闭环${c.reset}`,
     '',
     `  ${c.dim}地址${c.reset}      ${address}`,
     `  ${c.dim}数据库${c.reset}    ${info.dbFile}`,
@@ -84,7 +84,8 @@ function printBanner(
     `  ${c.dim}在浏览器打开界面后输入这个码。它是一次性的，配对成功后会自动更换。${c.reset}`,
     '',
     `${c.dim}本版本已实现：登记 / 用量导入与去重 / 额度快照 / 记忆候选审核与版本 / 上下文包 / 备份恢复${c.reset}`,
-    `${c.dim}本版本未实现：本地 MCP 传输层、外部接口探测、ChatGPT 导出包解析、内置 AI 提炼（对应 M1 / M2）${c.reset}`,
+    `${c.dim}本版本已实现：本地 MCP 传输层（六个工具）、Codex 用量只读探测${c.reset}`,
+    `${c.dim}本版本未实现：真实客户端联调、Cursor 探测、ChatGPT 导出包解析、内置 AI 提炼（M1 剩余 / M2）${c.reset}`,
     '',
     `${c.cyan}提示：界面上「官方文档描述支持」与「本机已验证」是两种不同状态，不会混为一谈。${c.reset}`,
     '',
