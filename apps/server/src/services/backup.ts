@@ -10,8 +10,9 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { z } from 'zod';
 import { databaseCounts, type DemoCounts } from '../db/repos/system.js';
 import { TxAbort, SCHEMA_VERSION } from '../db/database.js';
 import type { AppConfig } from '../config.js';
@@ -36,6 +37,34 @@ export interface BackupReport {
   dir: string;
   manifest: BackupManifest;
   files: string[];
+}
+
+const BACKUP_NAME = /^\d{8}-\d{6}(?:-[1-9]\d*)?$/;
+const zBackupManifest = z.object({
+  formatVersion: z.literal(1),
+  name: z.string().regex(BACKUP_NAME),
+  createdAt: z.iso.datetime(),
+  schemaVersion: z.number().int().positive(),
+  counts: z.record(z.string(), z.number().int().nonnegative()),
+  files: z.array(z.object({
+    name: z.literal('ai-control-center.sqlite'),
+    bytes: z.number().int().nonnegative(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  })).length(1),
+});
+
+/** A backup identifier is a direct child name, never an arbitrary filesystem path. */
+function resolveBackupDir(config: AppConfig, name: string): string {
+  if (!BACKUP_NAME.test(name)) throw new TxAbort('invalid_input', '备份名称无效，请从备份列表选择');
+  const root = resolve(config.backupDir);
+  const dir = resolve(root, name);
+  if (dirname(dir) !== root) throw new TxAbort('invalid_input', '备份必须位于备份目录内');
+  if (!existsSync(dir)) throw new TxAbort('not_found', `备份不存在：${name}`);
+  if (lstatSync(dir).isSymbolicLink() || !lstatSync(dir).isDirectory() ||
+      dirname(realpathSync(dir)) !== realpathSync(root)) {
+    throw new TxAbort('invalid_input', '备份目录不能是符号链接或指向其他位置');
+  }
+  return dir;
 }
 
 function sha256File(path: string): string {
@@ -105,15 +134,15 @@ export interface BackupListing {
   bytes: number;
   counts: DemoCounts;
   /** 清单是否可读、校验和是否仍然匹配。 */
-  integrity: 'ok' | 'checksum_mismatch' | 'manifest_missing' | 'file_missing';
+  integrity: 'ok' | 'checksum_mismatch' | 'manifest_missing' | 'manifest_invalid' | 'file_missing' | 'unsafe_path';
 }
 
 export function listBackups(config: AppConfig): BackupListing[] {
   if (!existsSync(config.backupDir)) return [];
   const out: BackupListing[] = [];
   for (const entry of readdirSync(config.backupDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const dir = join(config.backupDir, entry.name);
+    if (!entry.isDirectory() || !BACKUP_NAME.test(entry.name)) continue;
+    const dir = resolveBackupDir(config, entry.name);
     out.push(inspectBackup(dir));
   }
   return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
@@ -123,19 +152,24 @@ export function inspectBackup(dir: string): BackupListing {
   const manifestPath = join(dir, 'manifest.json');
   const sqlitePath = join(dir, 'ai-control-center.sqlite');
 
-  if (!existsSync(manifestPath)) {
-    return {
-      name: basename(dir),
-      dir,
-      createdAt: '',
-      schemaVersion: 0,
-      bytes: existsSync(sqlitePath) ? statSync(sqlitePath).size : 0,
-      counts: {},
-      integrity: 'manifest_missing',
-    };
+  const invalid = (integrity: BackupListing['integrity']): BackupListing => ({
+    name: basename(dir), dir, createdAt: '', schemaVersion: 0, bytes: 0, counts: {}, integrity,
+  });
+  if (lstatSync(dir).isSymbolicLink()) return invalid('unsafe_path');
+  for (const file of [manifestPath, sqlitePath]) {
+    if (existsSync(file) && (!lstatSync(file).isFile() || lstatSync(file).isSymbolicLink())) {
+      return invalid('unsafe_path');
+    }
   }
+  if (!existsSync(manifestPath)) return invalid('manifest_missing');
 
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as BackupManifest;
+  let manifest: z.infer<typeof zBackupManifest>;
+  try {
+    manifest = zBackupManifest.parse(JSON.parse(readFileSync(manifestPath, 'utf8')));
+    if (manifest.name !== basename(dir)) return invalid('manifest_invalid');
+  } catch {
+    return invalid('manifest_invalid');
+  }
   if (!existsSync(sqlitePath)) {
     return {
       name: manifest.name,
@@ -150,7 +184,8 @@ export function inspectBackup(dir: string): BackupListing {
 
   const expected = manifest.files.find((f) => f.name === 'ai-control-center.sqlite');
   const actual = sha256File(sqlitePath);
-  const integrity = expected && expected.sha256 !== actual ? 'checksum_mismatch' : 'ok';
+  const integrity = !expected || expected.sha256 !== actual || expected.bytes !== statSync(sqlitePath).size
+    ? 'checksum_mismatch' : 'ok';
 
   return {
     name: manifest.name,
@@ -183,12 +218,13 @@ export interface RestorePlan {
  * 用户要先看清「恢复后会变成什么样」再确认。
  */
 export function planRestore(ctx: ServiceContext, name: string): RestorePlan {
-  const dir = join(ctx.config.backupDir, name);
-  if (!existsSync(dir)) {
-    throw new TxAbort('not_found', `备份不存在：${name}`);
-  }
+  const dir = resolveBackupDir(ctx.config, name);
   const listing = inspectBackup(dir);
   const warnings: string[] = [];
+
+  if (listing.integrity === 'manifest_invalid' || listing.integrity === 'unsafe_path') {
+    throw new TxAbort('invalid_input', '备份清单无效或包含不安全的文件链接，已拒绝恢复');
+  }
 
   if (listing.integrity === 'manifest_missing') {
     throw new TxAbort('invalid_input', '该目录缺少 manifest.json，无法校验完整性，已拒绝恢复');
@@ -276,7 +312,6 @@ export function restoreInPlace(ctx: ServiceContext, plan: RestorePlan): { preRes
 }
 
 export function deleteBackup(config: AppConfig, name: string): void {
-  const dir = join(config.backupDir, name);
-  if (!existsSync(dir)) throw new TxAbort('not_found', `备份不存在：${name}`);
+  const dir = resolveBackupDir(config, name);
   rmSync(dir, { recursive: true, force: true });
 }

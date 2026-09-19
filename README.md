@@ -1,6 +1,8 @@
 # AI Control Center
 
-个人 AI 用量与记忆工作台。**本地单用户，单机运行，不替换你现有的任何 AI 客户端。**
+个人 AI 历史用量工作台。**本地单用户，单机运行，不替换你现有的任何 AI 客户端。**
+
+首页以历史累计 Token 为主：同步本机 Codex 会话记录，查看输入、输出、缓存、推理及模型 / 日期分布；导入 API 用量记录后按供应商累计。当前 Codex 额度与 DeepSeek 余额位于折叠区，记忆工具暂放「更多工具」。使用方式与覆盖边界见 [历史用量统计](./docs/06-usage-dashboard.md)。
 
 它解决的问题是：你在 ChatGPT、Codex、Cursor、WorkBuddy 之间来回切换时，
 用量、额度、项目状态和个人偏好各自留在不同客户端里，彼此之间无法交接。
@@ -48,6 +50,11 @@ npm start              # 启动服务
 它需要两样东西才能工作：**工作台服务正在运行**，以及**一个复用凭据**（在
 「设置与连接 → 代理凭据」里签发，明文只显示一次）。
 
+在「代理凭据 → 连接本地 MCP」可复制 Codex TOML / Cursor JSON 配置。配置自动使用
+本机 Node、MCP 入口的完整路径和当前服务端口；签发弹窗内的配置会填入刚签发的凭据。
+已有配置文件时只合并本服务的配置项，保留其他服务。完整步骤见
+[`docs/04-how-to-use.md`](./docs/04-how-to-use.md#6-本地-mcp-接入)。
+
 环境变量只有两个（`AICC_API_URL` 默认就是 `http://127.0.0.1:8787`）：
 
 ```bash
@@ -73,10 +80,13 @@ npm run dev            # 同时启动 API(8787) 与 Vite(5173)
 
 ```bash
 npm run verify:sqlite  # SQLite 驱动最小兼容性验证
-npm test               # core + server + mcp 全部测试（当前 179 项）
+npm test               # core + server + mcp + web 全部测试
 npm run typecheck
 npm run verify:smoke   # 真实 HTTP 端到端冒烟（会真的启动服务进程）
 ```
+
+本轮审查与改进记录见 [`docs/05-review-hardening.md`](./docs/05-review-hardening.md)：
+代理读取权限、备份校验、示例工作区隔离、候选预检、未知 token 与 MCP 接入配置。
 
 ### 起不来的时候
 

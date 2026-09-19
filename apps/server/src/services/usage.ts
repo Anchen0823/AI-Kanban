@@ -767,9 +767,34 @@ export function importData(ctx: ServiceContext, input: ImportInput): ImportOutco
 function stringifyValues(record: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(record)) {
-    if (v === null || v === undefined) out[k] = '';
+    if (k === 'created' && typeof v === 'number' && Number.isFinite(v)) {
+      const created = new Date(v * 1000);
+      out[k] = Number.isNaN(created.getTime()) ? String(v) : created.toISOString();
+    } else if (v === null || v === undefined) out[k] = '';
     else if (typeof v === 'object') out[k] = JSON.stringify(v);
     else out[k] = String(v);
+  }
+
+  // DeepSeek/OpenAI 风格响应把计数放在 record.usage。只展开明确的 token 字段，
+  // 不递归展开 metadata，也不覆盖顶层同名字段；原始嵌套对象仍完整保存在 raw_usage。
+  const usage = record.usage;
+  if (usage && typeof usage === 'object' && !Array.isArray(usage)) {
+    const fields: Array<[string, string]> = [
+      ['input_tokens', 'input_tokens'],
+      ['prompt_tokens', 'prompt_tokens'],
+      ['output_tokens', 'output_tokens'],
+      ['completion_tokens', 'completion_tokens'],
+      ['total_tokens', 'total_tokens'],
+      ['cached_tokens', 'cached_tokens'],
+      ['prompt_cache_hit_tokens', 'cached_tokens'],
+      ['reasoning_tokens', 'reasoning_tokens'],
+    ];
+    for (const [source, target] of fields) {
+      if (Object.hasOwn(out, target)) continue;
+      const value = (usage as Record<string, unknown>)[source];
+      if (value === null || value === undefined || typeof value === 'object') continue;
+      out[target] = String(value);
+    }
   }
   return out;
 }

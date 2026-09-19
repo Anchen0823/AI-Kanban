@@ -198,6 +198,14 @@ export function registerAgentRoutes(fastify: FastifyInstance, deps: HttpDeps): v
     const scope = principalProjectScope(principal);
     assertProjectAllowed(principal, scope, input.projectId, 'memory_propose');
 
+    // update / archive 的授权必须依据目标记忆的真实项目，而不是候选自报的 projectId。
+    // 服务层还会校验两者必须完全一致；这里先做授权检查，以便越权尝试得到 403 与审计记录。
+    if (input.operation !== 'create' && input.targetMemoryId) {
+      const target = getMemoryDetail(ctx, input.targetMemoryId)?.memory;
+      if (!target) throw new ApiError(404, 'not_found', `目标记忆不存在：${input.targetMemoryId}`);
+      assertProjectAllowed(principal, scope, target.projectId, 'memory_propose');
+    }
+
     // 身份来自凭据，不来自请求体里的 submittedByClientId。
     // 如果模型自报的 client_id 与凭据不一致，以凭据为准并记录下来。
     const claimed = input.submittedByClientId;

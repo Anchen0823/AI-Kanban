@@ -95,16 +95,6 @@ export function RegistryPanel({ toast, reload }: { toast: PageProps['toast']; re
 
   return (
     <div className="stack">
-      <Alert tone="info" title="这一页登记的是「谁在花钱、花在哪」">
-        <span>
-          客户端 = 你用什么入口调用 AI；账户 = 谁在计费；订阅 = 固定支出。
-          三者分开，是为了让「一个订阅覆盖多个入口」这种常见情况只记一次钱（INV-09）。
-        </span>
-        <span className="alert-hint">
-          登记本身不会自动采集任何数据。这一页只建立账目框架，用量仍然需要你自己导入或手动录入。
-        </span>
-      </Alert>
-
       {error ? <Alert tone="danger" title="加载失败">{error}</Alert> : null}
 
       <div className="pill-group">

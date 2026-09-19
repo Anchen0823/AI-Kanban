@@ -29,9 +29,42 @@ export function getWorkspace(): Workspace {
   return currentWorkspace;
 }
 
-function withWorkspace(path: string): string {
+/**
+ * Attach the selected workspace to a URL.  This is also used by native
+ * browser links (for example CSV export), which do not pass through request().
+ */
+export function workspacePath(path: string): string {
   if (currentWorkspace === 'real' || !path.startsWith('/api/')) return path;
   return path.includes('?') ? `${path}&workspace=demo` : `${path}?workspace=demo`;
+}
+
+/**
+ * Demo data is a viewing workspace.  The server's registry and global
+ * settings endpoints intentionally write to the real database, so allowing a
+ * mutation from this view would make a click appear to succeed while the new
+ * row immediately disappears from the selected workspace (and pollutes real
+ * data).  Keep the guard here so every page gets the same protection.
+ */
+export function demoMutationBlockReason(method: string, path: string): string | null {
+  if (currentWorkspace !== 'demo' || method === 'GET') return null;
+  // These endpoints are either session/demo controls or are explicitly
+  // workspace-aware on the server.  Context generation writes a demo-scoped
+  // export; delete-preview only calculates an impact list.
+  if (
+    path === '/api/session' ||
+    path.startsWith('/api/session/') ||
+    path.startsWith('/api/demo/') ||
+    path === '/api/context-exports' ||
+    /^\/api\/memories\/[^/]+\/delete-preview$/.test(path)
+  ) {
+    return null;
+  }
+  return '示例数据工作区只读，请切回真实数据后再执行此操作。';
+}
+
+function assertDemoMutationAllowed(method: string, path: string): void {
+  const reason = demoMutationBlockReason(method, path);
+  if (reason) throw new ApiError(409, 'demo_read_only', reason);
 }
 
 export class ApiError extends Error {
@@ -58,13 +91,14 @@ async function request<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  assertDemoMutationAllowed(method, path);
   const headers: Record<string, string> = { accept: 'application/json' };
   if (method !== 'GET') {
     headers['content-type'] = 'application/json';
     headers[CSRF_HEADER] = '1';
   }
 
-  const response = await fetch(method === 'GET' ? withWorkspace(path) : path, {
+  const response = await fetch(workspacePath(path), {
     method,
     headers,
     credentials: 'same-origin',

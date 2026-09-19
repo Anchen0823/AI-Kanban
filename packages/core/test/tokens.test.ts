@@ -57,6 +57,19 @@ test('有分量时以分量为准，供应商自报总量只用于交叉核对',
   assert.match(mismatch.warnings[0] as string, /不一致/);
 });
 
+test('只有一个输入/输出分量时不把缺失分量当作 0', () => {
+  const partial = normalizeOpenAiLike({ input_tokens: 100 });
+  assert.equal(partial.inputTotal, 100);
+  assert.equal(partial.outputTotal, null);
+  assert.equal(partial.totalReported, null, '未知 output 不能被补成 0 后当作完整总量');
+  assert.match(partial.warnings[0] as string, /缺失分量按未知保留/);
+  assert.equal(computeTotalFromParts({ inputTotal: 100, outputTotal: null }), null);
+
+  const providerTotal = normalizeOpenAiLike({ input_tokens: 100, total_tokens: 125 });
+  assert.equal(providerTotal.totalReported, 125, '有明确供应商总量时可以保留该自报值');
+  assert.match(providerTotal.warnings[0] as string, /无法核对子集语义/);
+});
+
 test('U02 变体：cached 与 reasoning 为 0 是真实值，不是未知', () => {
   const n = normalizeOpenAiLike({
     input_tokens: 500,
@@ -148,6 +161,15 @@ test('嵌套在 usage 下的字段也能读到', () => {
   assert.equal(n.totalReported, 1000);
   assert.equal(n.cachedInput, 100);
   assert.equal(n.reasoningOutput, 50);
+});
+
+test('嵌套字段同样拒绝不安全整数，避免聚合时静默损失精度', () => {
+  const n = normalizeOpenAiLike({
+    usage: { input_tokens: '9007199254740993', output_tokens: 2 },
+  });
+  assert.equal(n.inputTotal, null);
+  assert.equal(n.outputTotal, 2);
+  assert.equal(n.totalReported, null);
 });
 
 test('互斥桶式：总量为各桶之和，缺失桶导致不完整', () => {

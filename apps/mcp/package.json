@@ -1,6 +1,6 @@
 {
   "name": "@aicc/mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "本地 stdio MCP 服务：把工作台的记忆能力以 MCP 工具暴露给 Codex / Cursor 等客户端",
   "type": "module",
@@ -15,6 +15,6 @@
     "test": "node --disable-warning=ExperimentalWarning --import tsx --test \"test/*.test.ts\""
   },
   "dependencies": {
-    "@aicc/core": "0.1.0"
+    "@aicc/core": "0.2.0"
   }
 }

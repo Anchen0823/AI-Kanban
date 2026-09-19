@@ -1,8 +1,8 @@
 {
   "name": "ai-control-center",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "AI Control Center — 个人 AI 用量与记忆工作台（M0：本地单用户闭环）",
+  "description": "AI Control Center — 个人 AI 历史用量与额度工作台",
   "type": "module",
   "engines": {
     "node": ">=22.5.0"
@@ -17,7 +17,7 @@
     "dev:web": "npm run dev -w @aicc/web",
     "build": "npm run build -w @aicc/core && npm run build -w @aicc/server && npm run build -w @aicc/mcp && npm run build -w @aicc/web",
     "typecheck": "npm run typecheck -w @aicc/core && npm run typecheck -w @aicc/server && npm run typecheck -w @aicc/mcp && npm run typecheck -w @aicc/web",
-    "test": "npm run test -w @aicc/core && npm run test -w @aicc/server && npm run test -w @aicc/mcp",
+    "test": "npm run test -w @aicc/core && npm run test -w @aicc/server && npm run test -w @aicc/mcp && npm run test -w @aicc/web",
     "start": "npm run start -w @aicc/server",
     "verify:sqlite": "node scripts/verify-sqlite.mjs",
     "verify:smoke": "node scripts/smoke.mjs"

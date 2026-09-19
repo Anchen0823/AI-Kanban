@@ -18,7 +18,6 @@ import { toCsv } from '../../imports/guard.js';
 import { ApiError } from '../errors.js';
 import {
   principalProjectScope,
-  requirePrincipal,
   requireScope,
   requireUser,
   workspaceOf,
@@ -107,7 +106,7 @@ export function registerContextRoutes(fastify: FastifyInstance, deps: HttpDeps):
   });
 
   fastify.get('/api/context-exports', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const q = z
       .object({ projectId: z.string().max(64).optional(), limit: z.coerce.number().int().min(1).max(200).default(50) })
       .parse(request.query ?? {});
@@ -132,7 +131,7 @@ export function registerContextRoutes(fastify: FastifyInstance, deps: HttpDeps):
   });
 
   fastify.get('/api/context-exports/:id', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(request.params);
     const record = getContextExport(app.db, id);
     if (!record) throw new ApiError(404, 'not_found', `上下文包不存在：${id}`);
@@ -187,7 +186,7 @@ export function registerContextRoutes(fastify: FastifyInstance, deps: HttpDeps):
   /* ---------------- 项目包预览 ---------------- */
 
   fastify.get('/api/projects/:id/context-preview', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(request.params);
     const project = getProject(app.db, id);
     if (!project) throw new ApiError(404, 'not_found', `项目不存在：${id}`);
@@ -218,7 +217,7 @@ export function registerContextRoutes(fastify: FastifyInstance, deps: HttpDeps):
   });
 
   fastify.get('/api/bridge/status', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const counters = memoryCounters(ctx);
     return {
       counters,

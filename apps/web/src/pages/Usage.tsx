@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   api,
+  workspacePath,
   type AccountRecord,
   type Charge,
   type ClientRecord,
@@ -132,9 +133,9 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
       <div className="pill-group">
         {(
           [
+            ['quota', '额度快照'],
             ['usage', '用量明细'],
             ['charges', '收费流水'],
-            ['quota', '额度快照'],
             ['import', '导入数据'],
           ] as const
         ).map(([key, label]) => (
@@ -148,9 +149,9 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
         <>
           <Card
             title="已观测 token"
-            hint="只统计主统计源；未知不当作 0"
+            hint="未知值保留为未知"
             actions={
-              <a className="ghost small" href="/api/exports/usage.csv">
+              <a className="ghost small" href={workspacePath('/api/exports/usage.csv')}>
                 导出 CSV（含公式注入防护）
               </a>
             }
@@ -167,7 +168,7 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
                 <div className="small-text">{totals?.coverage ?? '—'}</div>
                 {totals && totals.unknownCount > 0 ? (
                   <div className="notice warn-text">
-                    有 {totals.unknownCount} 条记录供应商未报告 token。它们没有被按 0 计入。
+                    {totals.unknownCount} 条记录没有 token 数值，未按 0 计入。
                   </div>
                 ) : null}
               </div>
@@ -203,7 +204,7 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
             ) : null}
           </Card>
 
-          <Card title="筛选" tight>
+          <Card title="筛选" hint="默认只看主统计源" tight>
             <div className="row" style={{ gap: 12 }}>
               <div className="pill-group">
                 {KIND_FILTERS.map((f) => (
@@ -253,12 +254,12 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
                   checked={includeNonPrimary}
                   onChange={(e) => setIncludeNonPrimary(e.target.checked)}
                 />
-                <span>包含证据行与待确认行（不计入统计）</span>
+                <span>显示证据与待确认行</span>
               </label>
             </div>
           </Card>
 
-          <Card title={`记录（${total} 条）`} hint={includeNonPrimary ? '包含非主统计源' : '仅主统计源'}>
+          <Card title={`记录（${total} 条）`} hint={includeNonPrimary ? '含证据与待确认行' : '仅主统计源'}>
             {loading && observations.length === 0 ? (
               <div className="faint">加载中…</div>
             ) : observations.length === 0 ? (
@@ -274,8 +275,6 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
                       <th>模型 / 归属</th>
                       <th className="num">输入</th>
                       <th className="num">输出</th>
-                      <th className="num">缓存</th>
-                      <th className="num">推理</th>
                       <th className="num">总量</th>
                       <th>来源</th>
                       <th>状态</th>
@@ -301,8 +300,6 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
                         </td>
                         <td className="num">{formatTokens(row.inputTotal)}</td>
                         <td className="num">{formatTokens(row.outputTotal)}</td>
-                        <td className="num faint">{formatTokens(row.cachedInput)}</td>
-                        <td className="num faint">{formatTokens(row.reasoningOutput)}</td>
                         <td className="num">
                           <strong>{formatTokens(row.totalReported)}</strong>
                         </td>
@@ -321,7 +318,7 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
                         </td>
                         <td className="nowrap">
                           <button className="ghost small" onClick={() => setDetail(row)}>
-                            来源
+                            详情
                           </button>
                         </td>
                       </tr>
@@ -431,7 +428,6 @@ function ObservationDetail({
   return (
     <Modal
       title="这个数字怎么来的"
-      subtitle="采集方式与数值质量是两件不同的事：方式说明「怎么拿到的」，质量说明「这个数有多可信」。"
       onClose={onClose}
       wide
     >
@@ -801,17 +797,6 @@ function QuotaPanel({
 
   return (
     <div className="stack">
-      <Alert tone="info" title="额度是状态，不是流水">
-        <span>
-          快照不参与任何求和，也不会和账户汇总、请求明细相加。小时窗和周窗分别展示，
-          不会平均成一个「综合剩余百分比」。
-        </span>
-        <span className="alert-hint">
-          手动填「官网显示 60%」时，数值质量仍然是「供应商自报」，但采集方式是「手动录入」——
-          两者的区别会诚实地标出来。
-        </span>
-      </Alert>
-
       <Card title="更新额度快照">
         <div className="grid cols-3">
           <label className="field">
@@ -832,7 +817,6 @@ function QuotaPanel({
               onChange={(e) => setForm({ ...form, bucketId: e.target.value })}
               placeholder="例如 chatgpt-weekly"
             />
-            <span className="help">同一个桶的历史快照会串成一条时间线。</span>
           </label>
           <label className="field">
             <span>显示名称</span>
@@ -865,12 +849,10 @@ function QuotaPanel({
               placeholder="58"
               inputMode="decimal"
             />
-            <span className="help">两者都填时之和必须为 100，否则会被标为自相矛盾。</span>
           </label>
           <label className="field">
             <span>重置时间</span>
             <input type="datetime-local" value={form.resetAt} onChange={(e) => setForm({ ...form, resetAt: e.target.value })} />
-            <span className="help">到点但没重新查询时显示「待刷新」，不会自动按 100% 算。</span>
           </label>
           <label className="field">
             <span>共享入口</span>
@@ -895,7 +877,6 @@ function QuotaPanel({
               onChange={(e) => setForm({ ...form, staleAfterSeconds: e.target.value })}
               inputMode="numeric"
             />
-            <span className="help">超过这个时长没有新观测就显示「已过期快照」。</span>
           </label>
         </div>
         <div className="modal-foot" style={{ border: 'none', paddingTop: 8 }}>
@@ -1052,17 +1033,6 @@ function ImportPanel({
 
   return (
     <div className="stack">
-      <Alert tone="info" title="先预检，再导入">
-        <span>
-          预检不写库，但会告诉你「有多少行会被判为重复导入」。这一步比「成功了多少行」更值得看：
-          它决定你会不会因为同一个文件导入两次而把账算成两倍。
-        </span>
-        <span className="alert-hint">
-          本版本支持纯文本 CSV / JSON。压缩包、二进制文件和含脚本特征的内容会被直接拒绝，
-          原始文件不会被修改。
-        </span>
-      </Alert>
-
       <Card title="导入来源">
         <div className="grid cols-3">
           <label className="field">
@@ -1083,7 +1053,6 @@ function ImportPanel({
           <label className="field">
             <span>文件名</span>
             <input value={fileName} onChange={(e) => setFileName(e.target.value)} />
-            <span className="help">只接受纯文件名。同一个文件名 + 同一份内容 = 同一个批次。</span>
           </label>
           <label className="field">
             <span>选择本地文件</span>
@@ -1108,7 +1077,6 @@ function ImportPanel({
               <option value="manual">手动</option>
               <option value="official_api">官方接口</option>
             </select>
-            <span className="help">系统不替你猜来源。这个选择会跟着每条记录保存。</span>
           </label>
           <label className="field">
             <span>数值质量</span>
@@ -1118,9 +1086,6 @@ function ImportPanel({
               <option value="estimated">估算</option>
               <option value="unknown">未知</option>
             </select>
-            <span className="help">
-              「官网导出的 CSV」和「我自己拼出来的日志」可信度不同，这个差别只存在于你脑子里。
-            </span>
           </label>
           <label className="field">
             <span>覆盖范围说明</span>
@@ -1129,7 +1094,6 @@ function ImportPanel({
               onChange={(e) => setCoverageScope(e.target.value)}
               placeholder="例如「仅 codex 客户端」"
             />
-            <span className="help">会显示在概览的覆盖范围里，避免被误读成账户全量。</span>
           </label>
           <label className="field">
             <span>归属账户</span>

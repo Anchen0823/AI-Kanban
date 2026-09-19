@@ -1,6 +1,6 @@
 {
   "name": "@aicc/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "领域模型与纯逻辑：金额、Token 归一化、幂等去重、额度新鲜度、记忆生命周期",
   "type": "module",

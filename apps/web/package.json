@@ -1,17 +1,18 @@
 {
   "name": "@aicc/web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "React 工作台前端",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "test": "node --import tsx --test \"test/*.test.ts\"",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aicc/core": "0.1.0",
+    "@aicc/core": "0.2.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

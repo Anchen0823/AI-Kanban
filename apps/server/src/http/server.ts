@@ -28,6 +28,12 @@ import { registerMemoryRoutes } from './routes/memory.js';
 import { registerContextRoutes } from './routes/context.js';
 import { registerSystemRoutes } from './routes/system.js';
 import { registerAgentRoutes } from './routes/agent.js';
+import { registerDetectionRoutes } from './routes/detection.js';
+import { registerDeepseekDetectionRoutes } from './routes/deepseek-detection.js';
+import { registerHistoryImportedRoutes } from './routes/history-imported.js';
+import { registerCodexHistoryRoutes } from './routes/history.js';
+import { registerDeepseekHistoryRoutes } from './routes/deepseek-history.js';
+import { registerHistoryTotalRoutes } from './routes/history-total.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -185,6 +191,12 @@ export function buildServer(deps: HttpDeps): FastifyInstance {
   registerMemoryRoutes(fastify, deps);
   registerContextRoutes(fastify, deps);
   registerAgentRoutes(fastify, deps);
+  registerDetectionRoutes(fastify, deps);
+  registerDeepseekDetectionRoutes(fastify, deps);
+  registerHistoryImportedRoutes(fastify, deps);
+  registerCodexHistoryRoutes(fastify, deps);
+  registerDeepseekHistoryRoutes(fastify, deps);
+  registerHistoryTotalRoutes(fastify, deps);
 
   fastify.get('/', (_request, reply) => {
     serveStatic(reply, config, '/');

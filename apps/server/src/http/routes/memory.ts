@@ -33,7 +33,6 @@ import { audit } from '../../services/audit.js';
 import { ApiError } from '../errors.js';
 import {
   principalProjectScope,
-  requirePrincipal,
   requireScope,
   requireUser,
   workspaceOf,
@@ -156,7 +155,7 @@ export function registerMemoryRoutes(fastify: FastifyInstance, deps: HttpDeps): 
   /* ---------------- 候选 ---------------- */
 
   fastify.get('/api/memory-proposals', async (request) => {
-    const principal = requirePrincipal(request);
+    requireUser(request, '查看候选审核数据');
     const query = zProposalsQuery.parse(request.query ?? {});
     const result = listProposalQueue(ctx, {
       workspace: workspaceOf(request),
@@ -165,28 +164,19 @@ export function registerMemoryRoutes(fastify: FastifyInstance, deps: HttpDeps): 
       limit: query.limit,
       offset: query.offset,
     });
-    const scope = principalProjectScope(principal);
-    const items =
-      scope === null ? result.items : result.items.filter((p) => p.projectId === null || scope.includes(p.projectId));
-    return { items, total: items.length, counters: memoryCounters(ctx, workspaceOf(request)) };
+    return { items: result.items, total: result.total, counters: memoryCounters(ctx, workspaceOf(request)) };
   });
 
   fastify.get('/api/memory-proposals/:id', async (request) => {
-    const principal = requirePrincipal(request);
+    requireUser(request, '查看候选审核数据');
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(request.params);
     const detail = proposalDetail(ctx, id);
     if (!detail) throw new ApiError(404, 'not_found', `候选不存在：${id}`);
 
-    const scope = principalProjectScope(principal);
-    if (scope !== null && detail.proposal.projectId !== null && !scope.includes(detail.proposal.projectId)) {
-      throw new ApiError(403, 'forbidden', '当前凭据未被授权访问该候选所属项目');
-    }
-
     return {
       ...detail,
-      reviewAllowed: principal.kind === 'user',
-      reviewBlockedReason:
-        principal.kind === 'user' ? null : '代理凭据不能审批候选。批准必须由你本人完成。',
+      reviewAllowed: true,
+      reviewBlockedReason: null,
     };
   });
 

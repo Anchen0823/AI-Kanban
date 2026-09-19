@@ -260,6 +260,16 @@ export function Alert({
   );
 }
 
+/** 次级口径说明默认收起，避免把主操作埋在长段落里。 */
+export function Explain({ children }: { children: ReactNode }): ReactNode {
+  return (
+    <details className="explain">
+      <summary>说明</summary>
+      <div className="explain-body">{children}</div>
+    </details>
+  );
+}
+
 export function StateDot({ tone }: { tone: Tone }): ReactNode {
   const cls = tone === 'ok' ? 'ok' : tone === 'warn' ? 'warn' : tone === 'danger' ? 'danger' : tone === 'accent' ? 'accent' : 'neutral';
   return <span className={`dot ${cls}`} />;

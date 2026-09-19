@@ -28,7 +28,7 @@ import {
 } from '../../db/repos/registry.js';
 import { audit } from '../../services/audit.js';
 import { ApiError } from '../errors.js';
-import { requirePrincipal, requireUser, type HttpDeps } from '../server.js';
+import { requireUser, workspaceOf, type HttpDeps } from '../server.js';
 
 export function registerRegistryRoutes(fastify: FastifyInstance, deps: HttpDeps): void {
   const { app } = deps;
@@ -37,8 +37,8 @@ export function registerRegistryRoutes(fastify: FastifyInstance, deps: HttpDeps)
   /* ---------------- 客户端 ---------------- */
 
   fastify.get('/api/clients', async (request) => {
-    requirePrincipal(request);
-    return { clients: listClients(app.db) };
+    requireUser(request, '查看工作台数据');
+    return { clients: listClients(app.db, { workspace: workspaceOf(request) }) };
   });
 
   fastify.post('/api/clients', async (request) => {
@@ -63,9 +63,9 @@ export function registerRegistryRoutes(fastify: FastifyInstance, deps: HttpDeps)
   /* ---------------- 计费账户 ---------------- */
 
   fastify.get('/api/accounts', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     return {
-      accounts: listAccounts(app.db),
+      accounts: listAccounts(app.db, { workspace: workspaceOf(request) }),
       note: '本表不保存任何第三方登录 Cookie 或会话令牌，只有你自己填的账户别名。',
     };
   });
@@ -91,9 +91,9 @@ export function registerRegistryRoutes(fastify: FastifyInstance, deps: HttpDeps)
   /* ---------------- 订阅 ---------------- */
 
   fastify.get('/api/subscriptions', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     return {
-      subscriptions: listSubscriptions(app.db),
+      subscriptions: listSubscriptions(app.db, { workspace: workspaceOf(request) }),
       note: '订阅与客户端是多对多。一个订阅覆盖多个入口时，固定月费只登记一次。',
     };
   });
@@ -131,8 +131,8 @@ export function registerRegistryRoutes(fastify: FastifyInstance, deps: HttpDeps)
   /* ---------------- 项目 ---------------- */
 
   fastify.get('/api/projects', async (request) => {
-    requirePrincipal(request);
-    return { projects: listProjects(app.db) };
+    requireUser(request, '查看工作台数据');
+    return { projects: listProjects(app.db, { workspace: workspaceOf(request) }) };
   });
 
   fastify.post('/api/projects', async (request) => {
@@ -172,7 +172,7 @@ export function registerRegistryRoutes(fastify: FastifyInstance, deps: HttpDeps)
   /* ---------------- 会话 ---------------- */
 
   fastify.get('/api/sessions', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const q = z.object({ projectId: z.string().max(64).optional() }).parse(request.query ?? {});
     return {
       sessions: listSessions(app.db, q.projectId),

@@ -70,8 +70,11 @@ function readPath(raw: Record<string, unknown>, path: readonly string[]): TokenV
     cur = (cur as Record<string, unknown>)[key];
   }
   if (cur === null || cur === undefined) return null;
-  if (typeof cur === 'number' && Number.isInteger(cur) && cur >= 0) return cur;
-  if (typeof cur === 'string' && /^\d+$/.test(cur.trim())) return Number(cur.trim());
+  if (typeof cur === 'number' && Number.isSafeInteger(cur) && cur >= 0) return cur;
+  if (typeof cur === 'string' && /^\d+$/.test(cur.trim())) {
+    const n = Number(cur.trim());
+    return Number.isSafeInteger(n) ? n : null;
+  }
   return null;
 }
 
@@ -120,18 +123,21 @@ export function normalizeOpenAiLike(raw: Record<string, unknown>): NormalizedTok
   // 供应商只给了总量、没给 I/O 分量的情况很常见（账户汇总、部分网关）。
   // 以前这里会把它当成「未知」，结果是整行被拒 —— 那等于把一条真实存在的记录丢掉，
   // 只因为它的形状和我们预期的不一样。现在按自报值保留总量，并明确标注无法核对子集语义。
-  const totalOnly = inputTotal === null && outputTotal === null && providerTotal !== null;
+  const hasCompleteParts = inputTotal !== null && outputTotal !== null;
+  const hasPartialParts = (inputTotal === null) !== (outputTotal === null);
 
-  const totalReported = totalOnly
-    ? providerTotal
-    : inputTotal === null && outputTotal === null
-      ? null
-      : (inputTotal ?? 0) + (outputTotal ?? 0);
+  // 缺一个分量不代表该分量为 0。若供应商明确给了 total_tokens，保留该自报值；
+  // 否则总量必须保持未知，不能把半份观测伪装成完整统计。
+  const totalReported = hasCompleteParts ? inputTotal + outputTotal : providerTotal;
 
-  if (totalOnly) {
+  if (!hasCompleteParts && providerTotal !== null) {
     warnings.push(
-      '供应商只报告了总量，没有输入/输出分量。总量按自报值保留，但无法核对缓存/推理是否为子集。',
+      hasPartialParts
+        ? '供应商未完整报告输入/输出分量。总量按自报值保留，但无法核对子集语义。'
+        : '供应商只报告了总量，没有输入/输出分量。总量按自报值保留，但无法核对缓存/推理是否为子集。',
     );
+  } else if (hasPartialParts) {
+    warnings.push('供应商只报告了输入或输出分量，无法得出完整总量；缺失分量按未知保留，不按 0 补全。');
   } else if (providerTotal !== null && totalReported !== null && providerTotal !== totalReported) {
     warnings.push(
       `供应商 total_tokens(${providerTotal}) 与本系统按子集语义算出的总量(${totalReported}) 不一致；以子集语义为准，差异保留待核查。`,
@@ -192,8 +198,8 @@ export function computeTotalFromParts(parts: {
   outputTotal?: TokenValue;
 }): TokenValue {
   const { inputTotal = null, outputTotal = null } = parts;
-  if (inputTotal === null && outputTotal === null) return null;
-  return (inputTotal ?? 0) + (outputTotal ?? 0);
+  if (inputTotal === null || outputTotal === null) return null;
+  return inputTotal + outputTotal;
 }
 
 /** 校验一个归一化结果是否满足 INV-02。 */

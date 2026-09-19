@@ -8,6 +8,7 @@ import {
 } from '../api.js';
 import type { PageProps } from '../App.js';
 import { RegistryPanel } from './Registry.js';
+import { McpSetup } from './McpSetup.js';
 import {
   Alert,
   Badge,
@@ -557,7 +558,7 @@ function CredentialsPanel({
   >([]);
   const [projects, setProjects] = useState<Array<{ id: string; title: string }>>([]);
   const [form, setForm] = useState({ clientId: '', label: '', projectIds: [] as string[], scopes: ['memory_search', 'memory_get', 'context_build', 'memory_propose'] as string[] });
-  const [issued, setIssued] = useState<{ token: string; note: string } | null>(null);
+  const [issued, setIssued] = useState<{ token: string; note: string; scopes: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -604,7 +605,7 @@ function CredentialsPanel({
             onClick={async () => {
               setBusy(true);
               try {
-                const result = await api.post<{ token: string; note: string }>('/api/credentials', {
+                const result = await api.post<{ token: string; note: string; scopes: string[] }>('/api/credentials', {
                   clientId: form.clientId,
                   label: form.label.trim(),
                   projectIds: form.projectIds.length > 0 ? form.projectIds : null,
@@ -729,9 +730,12 @@ function CredentialsPanel({
                 因此全局个人记忆默认不向每个 agent 开放，只授予必要的已批准项目事实。
               </span>
             </Alert>
+            <McpSetup token={issued.token} scopes={issued.scopes} toast={toast} />
           </div>
         </Modal>
       ) : null}
+
+      <McpSetup toast={toast} />
 
       <Card tight title={`已签发的凭据（${credentials.length} 个）`}>
         {credentials.length === 0 ? (

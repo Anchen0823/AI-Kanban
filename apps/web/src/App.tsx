@@ -42,21 +42,24 @@ interface Toast {
 }
 
 const NAV: Array<{ key: PageKey; label: string }> = [
-  { key: 'overview', label: '概览' },
-  { key: 'usage', label: '用量与订阅' },
+  { key: 'overview', label: '用量总览' },
+  { key: 'usage', label: '用量记录' },
+  { key: 'settings', label: '设置' },
+];
+
+const MORE_NAV: Array<{ key: PageKey; label: string }> = [
   { key: 'memory', label: '记忆中心' },
   { key: 'projects', label: '项目' },
   { key: 'bridge', label: 'ChatGPT 桥接' },
-  { key: 'settings', label: '设置与连接' },
 ];
 
 const PAGE_TITLE: Record<PageKey, string> = {
-  overview: '概览',
-  usage: '用量与订阅',
+  overview: '用量总览',
+  usage: '用量记录',
   memory: '记忆中心',
   projects: '项目',
   bridge: 'ChatGPT 桥接',
-  settings: '设置与连接',
+  settings: '设置',
 };
 
 export function App(): ReactNode {
@@ -68,6 +71,7 @@ export function App(): ReactNode {
   const [demoCounts, setDemoCounts] = useState<Record<string, number>>({});
   const [clearingDemo, setClearingDemo] = useState(false);
   const [workspace, setWorkspaceState] = useState<Workspace>(getWorkspace());
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const toast = useCallback((text: string, tone: ToastTone = 'info') => {
     const id = Date.now() + Math.random();
@@ -126,7 +130,7 @@ export function App(): ReactNode {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-name">AI Control Center</span>
-          <span className="brand-sub">M0 · 本地单用户闭环</span>
+          <span className="brand-sub">AI 用量工作台</span>
         </div>
         <nav className="nav">
           {NAV.map((item) => (
@@ -138,10 +142,27 @@ export function App(): ReactNode {
               <span>{item.label}</span>
             </button>
           ))}
+          <details
+            className="nav-more"
+            open={moreOpen || MORE_NAV.some((item) => item.key === page)}
+            onToggle={(event) => setMoreOpen((event.currentTarget as HTMLDetailsElement).open)}
+          >
+            <summary className="nav-item">更多工具</summary>
+            <div className="nav-subitems">
+              {MORE_NAV.map((item) => (
+                <button
+                  key={item.key}
+                  className={`nav-item nav-subitem${page === item.key ? ' active' : ''}`}
+                  onClick={() => setPage(item.key)}
+                >
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </details>
         </nav>
         <div className="sidebar-foot">
-          <span>主体：{session.label ?? '本机用户'}</span>
-          <span>权限：{Array.isArray(session.scopes) ? `${session.scopes.length} 项 scope` : '完整用户会话'}</span>
+          <span><span className="dot ok" /> 本地连接</span>
           {forbidden.size > 0 ? <span className="warn-text">受限：审批 / 删除 / 连接管理不可用</span> : null}
         </div>
       </aside>
@@ -150,7 +171,7 @@ export function App(): ReactNode {
         <header className="page-head">
           <div>
             <h1>{PAGE_TITLE[page]}</h1>
-            <PageSubtitle page={page} />
+            {page !== 'overview' && page !== 'usage' ? <PageSubtitle page={page} /> : null}
           </div>
           <div className="page-actions">
             {demoTotal > 0 ? (
@@ -175,8 +196,12 @@ export function App(): ReactNode {
             <button
               className="ghost"
               onClick={async () => {
-                await api.delete('/api/session');
-                await loadSession();
+                try {
+                  await api.delete('/api/session');
+                  await loadSession();
+                } catch (err) {
+                  toast(err instanceof Error ? err.message : String(err), 'danger');
+                }
               }}
             >
               退出配对
@@ -186,15 +211,8 @@ export function App(): ReactNode {
 
         {workspace === 'demo' ? (
           <div style={{ marginBottom: 14 }}>
-            <Alert tone="warn" title="你正在查看示例数据工作区">
-              <span>
-                这里显示的全部是合成数据，名称以「【示例】」开头。它们<strong>不会</strong>
-                进入真实统计数据。
-              </span>
-              <span className="alert-hint">
-                示例数据刻意包含了未知 token、待刷新额度、疑似重复、待审候选、版本冲突等「不完美」状态 ——
-                只放「一切正常」的样例会掩盖这个系统真正在解决的问题。
-              </span>
+            <Alert tone="warn" title="正在查看示例数据">
+              <span>合成数据，不计入真实统计。</span>
               <div className="row tight" style={{ marginTop: 6 }}>
                 <button className="small" onClick={() => switchWorkspace('real')}>
                   切回真实数据
@@ -204,15 +222,9 @@ export function App(): ReactNode {
           </div>
         ) : null}
 
-        {demoTotal > 0 && workspace === 'real' ? (
+        {demoTotal > 0 && workspace === 'real' && page === 'settings' ? (
           <div style={{ marginBottom: 14 }}>
-            <Alert tone="info" title="库中存在示例数据（当前未显示）">
-              <span>
-                共 {demoTotal} 行示例数据（{Object.entries(demoCounts)
-                  .map(([t, n]) => `${t} ${n}`)
-                  .join('、')}
-                ）。它们不计入本页任何数字。
-              </span>
+            <Alert tone="info" title="示例数据未计入当前统计">
               <div className="row tight" style={{ marginTop: 6 }}>
                 <button className="small" onClick={() => switchWorkspace('demo')}>
                   查看示例数据
@@ -242,7 +254,7 @@ export function App(): ReactNode {
         ) : null}
 
         {page === 'overview' ? (
-          <OverviewPage navigate={setPage} toast={toast} hasDemoData={demoTotal > 0} refreshToken={refreshToken} reload={reload} />
+          <OverviewPage key={workspace} navigate={setPage} toast={toast} hasDemoData={demoTotal > 0} refreshToken={refreshToken} reload={reload} />
         ) : null}
         {page === 'usage' ? (
           <UsagePage navigate={setPage} toast={toast} hasDemoData={demoTotal > 0} refreshToken={refreshToken} reload={reload} />
@@ -274,12 +286,12 @@ export function App(): ReactNode {
 
 function PageSubtitle({ page }: { page: PageKey }): ReactNode {
   const text: Record<PageKey, string> = {
-    overview: '分口径展示：各币种支出按状态分桶，token 只报「已观测」，额度是独立状态卡片。不给出一个看起来精确的「总消耗」。',
-    usage: '用量明细与收费流水。默认只显示主统计源；证据行与待确认行需要显式展开。',
-    memory: '候选箱与正式库。AI 只能提案，批准是你一个人的动作。',
-    projects: '目标、当前状态、决策、失败路径与可归属费用。上下文包按项目生成。',
-    bridge: '不依赖任何新连接的跨工具路径：把候选带进来，把上下文带出去。',
-    settings: '登记、自检、能力台账、凭据、备份与审计。区分「官方文档说支持」与「本机已验证」。',
+    overview: '累计历史用量，查看模型与日期分布。',
+    usage: '查看用量记录、费用与额度快照。',
+    memory: '审核候选，管理正式记忆。',
+    projects: '项目状态与上下文包。',
+    bridge: '在工具之间搬运候选与上下文。',
+    settings: '登记、连接、备份与审计。',
   };
   return <div className="sub">{text[page]}</div>;
 }
@@ -323,7 +335,7 @@ function PairGate({
             <div className="brand-name">AI Control Center</div>
             <div className="brand-sub">本地单用户工作台 · 需要配对</div>
           </div>
-          <Badge tone="ghost">M0</Badge>
+          <Badge tone="ghost">本地会话</Badge>
         </div>
 
         <div className="stack">

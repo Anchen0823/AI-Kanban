@@ -246,6 +246,10 @@ spawn `codex app-server`
 
 ## 7. 验证阶梯（M1 实测结果）
 
+以下表格保留 M1 最初交付时的结果。2026-09-19 的权限修复、备份加固、
+示例工作区隔离与 MCP 配置生成，以及最新验证结果，见
+[`05-review-hardening.md`](./05-review-hardening.md)。
+
 Windows 11 / Node v22.22.2 / TypeScript 7.0.2 / codex-cli 0.130.0。
 
 | 项目 | 命令 | 结果 |

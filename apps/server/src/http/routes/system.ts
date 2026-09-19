@@ -16,6 +16,7 @@ import { deleteBackup, listBackups } from '../../services/backup.js';
 import { demoStatus, resetDemo, seedDemo } from '../../services/demo.js';
 import { CODEX_ADAPTER_ID, CODEX_ADAPTER_VERSION, probeCodex } from '../../collectors/codex-usage.js';
 import { storeProbeQuotaSnapshots } from '../../services/integration-probe.js';
+import { describeMcpSetup } from '../../services/mcp-setup.js';
 import { SCHEMA_VERSION } from '../../db/database.js';
 import { getClient, listClients } from '../../db/repos/registry.js';
 import {
@@ -31,7 +32,7 @@ import {
 import { ApiError } from '../errors.js';
 import { parseCookies, SESSION_COOKIE, type SessionStore } from '../auth.js';
 import type { ServiceContext } from '../../service-context.js';
-import { requirePrincipal, requireUser, workspaceOf, type HttpDeps } from '../server.js';
+import { requireUser, workspaceOf, type HttpDeps } from '../server.js';
 const zPairInput = z.object({
   code: z.string().min(4).max(32),
   label: z.string().max(120).default('本机浏览器'),
@@ -100,8 +101,24 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
 
   /* ---------------- 自检 ---------------- */
 
+  // socket address supplies the actual port when the server listens on port 0 in tests.
+  const mcpSetup = () => {
+    const address = fastify.server.address();
+    return describeMcpSetup({
+      host: app.config.host,
+      port: address && typeof address === 'object' ? address.port : app.config.port,
+    });
+  };
+
+  fastify.get('/api/mcp/setup', async (request, reply) => {
+    requireUser(request, 'MCP 接入配置');
+    reply.header('cache-control', 'no-store');
+    return mcpSetup();
+  });
+
   fastify.get('/api/self-check', async (request) => {
     requireUser(request);
+    const mcp = mcpSetup();
     return {
       schemaVersion: SCHEMA_VERSION,
       driver: app.bootstrapInfo.driver,
@@ -126,18 +143,20 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
         },
         {
           name: '本地 MCP 服务',
-          ok: false,
-          detail: 'M0 未实现（计划 M1）。当前只提供 HTTP API、凭据模型与项目范围隔离。',
+          ok: mcp.built,
+          detail: mcp.built
+            ? '已找到 MCP 构建入口。到「代理凭据」生成接入配置；进程启动和客户端实际联调仍需验证。'
+            : 'stdio 服务已实现，但缺少构建产物。请在项目根目录运行 npm run build 后刷新。',
         },
         {
           name: '外部用量接口探测',
-          ok: false,
-          detail: 'M0 未实现任何外部探测（计划 M1），集成能力状态保持 documented / unknown，不预填 verified。',
+          ok: true,
+          detail: '已实现 Codex 只读探测；本次账户是否可用请在「能力登记」执行探测。Cursor 用量探测尚未实现。',
         },
         {
           name: 'ChatGPT 导出包解析',
           ok: false,
-          detail: 'M0 未实现（计划 M2）。当前只支持粘贴候选与手动 / CSV / JSON 导入。',
+          detail: '尚未实现（计划 M2）。当前只支持粘贴候选与手动 / CSV / JSON 导入。',
         },
       ],
     };
@@ -281,7 +300,7 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
   /* ---------------- 能力登记 ---------------- */
 
   fastify.get('/api/integrations', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     return {
       integrations: listIntegrations(app.db, workspaceOf(request)),
       statusMeaning: {
@@ -434,7 +453,7 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
   /* ---------------- 工作区摘要 ---------------- */
 
   fastify.get('/api/workspace/summary', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     return {
       clients: listClients(app.db),
       integrations: listIntegrations(app.db, workspaceOf(request)),

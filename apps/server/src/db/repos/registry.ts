@@ -7,6 +7,21 @@
 
 import { newId, nowIso, type ClientKind, type CollectionMethod, type MeasurementQuality } from '@aicc/core';
 import type { DbConnection } from '../database.js';
+import { workspaceClause, type WorkspaceScope } from './workspace.js';
+
+/**
+ * 登记数据的读取范围。`includeDemo` 是 M0 时已有的内部调用约定：
+ * true 表示不过滤。保留它，避免备份/诊断等旧调用方改变语义；新的 HTTP
+ * 读取一律传 workspace，以区分 real / demo / all。
+ */
+export interface RegistryListOptions {
+  workspace?: WorkspaceScope;
+  includeDemo?: boolean;
+}
+
+function registryWorkspace(options: RegistryListOptions): WorkspaceScope {
+  return options.workspace ?? (options.includeDemo ? 'all' : 'real');
+}
 
 /* ------------------------------------------------------------------ */
 /* 客户端                                                              */
@@ -88,11 +103,11 @@ export function getClient(db: DbConnection, id: string): Client | undefined {
 
 export function listClients(
   db: DbConnection,
-  options: { includeDemo?: boolean } = {},
+  options: RegistryListOptions = {},
 ): Client[] {
-  const rows = options.includeDemo
-    ? db.prepare('SELECT * FROM client ORDER BY created_at').all<ClientRow>()
-    : db.prepare('SELECT * FROM client WHERE is_demo = 0 ORDER BY created_at').all<ClientRow>();
+  const rows = db
+    .prepare(`SELECT * FROM client WHERE ${workspaceClause(registryWorkspace(options))} ORDER BY created_at`)
+    .all<ClientRow>();
   return rows.map(toClient);
 }
 
@@ -153,10 +168,10 @@ export function getAccount(db: DbConnection, id: string): BillingAccount | undef
   return row ? toAccount(row) : undefined;
 }
 
-export function listAccounts(db: DbConnection, options: { includeDemo?: boolean } = {}): BillingAccount[] {
-  const rows = options.includeDemo
-    ? db.prepare('SELECT * FROM billing_account ORDER BY created_at').all<AccountRow>()
-    : db.prepare('SELECT * FROM billing_account WHERE is_demo = 0 ORDER BY created_at').all<AccountRow>();
+export function listAccounts(db: DbConnection, options: RegistryListOptions = {}): BillingAccount[] {
+  const rows = db
+    .prepare(`SELECT * FROM billing_account WHERE ${workspaceClause(registryWorkspace(options))} ORDER BY created_at`)
+    .all<AccountRow>();
   return rows.map(toAccount);
 }
 
@@ -278,10 +293,10 @@ export function getSubscription(db: DbConnection, id: string): Subscription | un
   return row ? toSubscription(row, clientIdsFor(db, id)) : undefined;
 }
 
-export function listSubscriptions(db: DbConnection, options: { includeDemo?: boolean } = {}): Subscription[] {
-  const rows = options.includeDemo
-    ? db.prepare('SELECT * FROM subscription ORDER BY created_at').all<SubscriptionRow>()
-    : db.prepare('SELECT * FROM subscription WHERE is_demo = 0 ORDER BY created_at').all<SubscriptionRow>();
+export function listSubscriptions(db: DbConnection, options: RegistryListOptions = {}): Subscription[] {
+  const rows = db
+    .prepare(`SELECT * FROM subscription WHERE ${workspaceClause(registryWorkspace(options))} ORDER BY created_at`)
+    .all<SubscriptionRow>();
   return rows.map((r) => toSubscription(r, clientIdsFor(db, r.id)));
 }
 
@@ -386,10 +401,10 @@ export function getProject(db: DbConnection, id: string): Project | undefined {
   return row ? toProject(row) : undefined;
 }
 
-export function listProjects(db: DbConnection, options: { includeDemo?: boolean } = {}): Project[] {
-  const rows = options.includeDemo
-    ? db.prepare('SELECT * FROM project ORDER BY created_at').all<ProjectRow>()
-    : db.prepare('SELECT * FROM project WHERE is_demo = 0 ORDER BY created_at').all<ProjectRow>();
+export function listProjects(db: DbConnection, options: RegistryListOptions = {}): Project[] {
+  const rows = db
+    .prepare(`SELECT * FROM project WHERE ${workspaceClause(registryWorkspace(options))} ORDER BY created_at`)
+    .all<ProjectRow>();
   return rows.map(toProject);
 }
 

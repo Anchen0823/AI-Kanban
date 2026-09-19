@@ -99,7 +99,24 @@ export interface ProposalCreated {
   similarProposals: Array<{ proposalId: string; title: string; similarity: number }>;
 }
 
-export function createProposal(ctx: ServiceContext, input: CreateProposalInput): ProposalCreated {
+interface PreparedProposal {
+  title: string;
+  content: string;
+  contentHash: string;
+  existingSame: MemoryProposal | undefined;
+  tombstone: ReturnType<typeof findTombstoneByContentHash>;
+  similar: Array<{ proposalId: string; title: string; similarity: number }>;
+  warnings: string[];
+}
+
+/**
+ * 候选写入与导入预检共用的无副作用校验。
+ *
+ * update / archive 的目标 ID 是一条引用，不能相信候选自己声明的 projectId：
+ * 目标记忆的真实范围必须与候选完全一致，否则项目 A 的凭据可以借一个项目 B 的
+ * memoryId 创建“属于 A”的候选，并从审核详情里读到 B 的正文。
+ */
+function prepareProposal(ctx: ServiceContext, input: CreateProposalInput): PreparedProposal {
   const title = normalizeText(input.title);
   const content = normalizeText(input.content);
   if (title.length === 0 || content.length === 0) {
@@ -114,6 +131,29 @@ export function createProposal(ctx: ServiceContext, input: CreateProposalInput):
   }
   if (input.scope === 'project' && !input.projectId) {
     throw new TxAbort('invalid_input', 'scope 为 project 的候选必须指定 projectId');
+  }
+
+  const projectId = input.projectId ?? null;
+  if (input.operation === 'create') {
+    if (input.targetMemoryId) {
+      throw new TxAbort('invalid_input', 'create 候选不能指定 targetMemoryId');
+    }
+  } else {
+    if (!input.targetMemoryId) {
+      throw new TxAbort('invalid_input', `${input.operation} 候选必须指定 targetMemoryId`);
+    }
+    const target = getMemory(ctx.db, input.targetMemoryId);
+    if (!target) throw new TxAbort('not_found', `目标记忆不存在：${input.targetMemoryId}`);
+    if (target.scope !== input.scope || target.projectId !== projectId) {
+      throw new TxAbort(
+        'invalid_input',
+        `目标记忆属于 scope=${target.scope}, projectId=${target.projectId ?? 'null'}，` +
+          `与候选声明的 scope=${input.scope}, projectId=${projectId ?? 'null'} 不一致`,
+      );
+    }
+    if (target.isDemo !== Boolean(input.isDemo)) {
+      throw new TxAbort('invalid_input', '目标记忆与候选不在同一工作区');
+    }
   }
 
   const contentHash = proposalContentHash(title, content);
@@ -146,6 +186,13 @@ export function createProposal(ctx: ServiceContext, input: CreateProposalInput):
   if (!input.sourceRef) {
     warnings.push('没有可验证的来源链接（source_ref 为空）。这是允许的，但系统不会替你编造一个。');
   }
+
+  return { title, content, contentHash, existingSame, tombstone, similar, warnings };
+}
+
+export function createProposal(ctx: ServiceContext, input: CreateProposalInput): ProposalCreated {
+  const prepared = prepareProposal(ctx, input);
+  const { title, content, contentHash, existingSame, tombstone, similar, warnings } = prepared;
 
   return tx(ctx.db, () => {
     const proposal = insertProposal(ctx.db, {
@@ -333,13 +380,8 @@ export function importCandidatePayload(
       return;
     }
 
-    if (input.dryRun) {
-      created.push({ index, proposalId: `preview-${index}`, title, warnings: ['预检：未写入数据库'] });
-      return;
-    }
-
     try {
-      const result = createProposal(ctx, {
+      const proposalInput: CreateProposalInput = {
         operation,
         targetMemoryId: candidate.target_memory_id ?? null,
         baseVersion: typeof candidate.base_version === 'number' ? candidate.base_version : null,
@@ -356,7 +398,20 @@ export function importCandidatePayload(
         evidenceQuote: candidate.source?.evidence_quote ?? candidate.evidence_quote ?? null,
         evidenceStatus,
         isDemo: input.isDemo,
-      });
+      };
+
+      if (input.dryRun) {
+        const prepared = prepareProposal(ctx, proposalInput);
+        created.push({
+          index,
+          proposalId: `preview-${index}`,
+          title: prepared.title,
+          warnings: [...prepared.warnings, '预检：未写入数据库'],
+        });
+        return;
+      }
+
+      const result = createProposal(ctx, proposalInput);
       created.push({ index, proposalId: result.proposal.id, title, warnings: result.warnings });
     } catch (err) {
       rejected.push({ index, reason: err instanceof Error ? err.message : String(err), title });

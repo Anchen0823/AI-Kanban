@@ -20,7 +20,7 @@ import { getImportJob, listImportJobs } from '../../db/repos/system.js';
 import { toCsv } from '../../imports/guard.js';
 import { audit } from '../../services/audit.js';
 import { ApiError } from '../errors.js';
-import { requirePrincipal, requireUser, workspaceOf, type HttpDeps } from '../server.js';
+import { requireUser, workspaceOf, type HttpDeps } from '../server.js';
 
 export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): void {
   const { app } = deps;
@@ -29,7 +29,7 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
   /* ---------------- 概览 ---------------- */
 
   fastify.get('/api/overview', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const overview = getOverview(ctx, workspaceOf(request));
     return {
       ...overview,
@@ -46,7 +46,7 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
   /* ---------------- 用量明细 ---------------- */
 
   fastify.get('/api/usage', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const query = zUsageQuery.parse(request.query ?? {});
     const workspace = workspaceOf(request);
     const result = queryUsage(ctx, { ...query, workspace });
@@ -108,7 +108,7 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
   /* ---------------- 收费 ---------------- */
 
   fastify.get('/api/charges', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const q = z
       .object({ accountId: z.string().max(64).optional(), limit: z.coerce.number().int().min(1).max(500).default(200) })
       .parse(request.query ?? {});
@@ -168,7 +168,7 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
   /* ---------------- 额度 ---------------- */
 
   fastify.get('/api/quota', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const result = quotaBuckets(ctx, workspaceOf(request));
     return {
       ...result,
@@ -186,7 +186,7 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
   });
 
   fastify.get('/api/quota/history', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const q = z
       .object({
         accountId: z.string().min(1).max(64),
@@ -200,7 +200,7 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
   /* ---------------- 导入 ---------------- */
 
   fastify.get('/api/imports', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     return {
       jobs: listImportJobs(app.db, 50, workspaceOf(request)),
       supportedKinds: ['usage_csv', 'usage_json', 'charge_csv'],
@@ -210,7 +210,7 @@ export function registerUsageRoutes(fastify: FastifyInstance, deps: HttpDeps): v
   });
 
   fastify.get('/api/imports/:id', async (request) => {
-    requirePrincipal(request);
+    requireUser(request, '查看工作台数据');
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(request.params);
     const job = getImportJob(app.db, id);
     if (!job) throw new ApiError(404, 'not_found', `导入批次不存在：${id}`);

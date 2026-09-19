@@ -276,6 +276,19 @@ test('M04：正文里的注入指令只被当作数据，不改变任何权限�
     });
     await approve(h, created.proposalId);
 
+    const secret = await propose(h, {
+      operation: 'create',
+      scope: 'project',
+      projectId: projectB,
+      kind: 'fact',
+      title: 'B 项目机密',
+      content: '只能由 B 项目授权主体读取',
+      sourceKind: 'manual_input',
+      evidenceStatus: 'verified',
+    });
+    const secretApproved = await approve(h, secret.proposalId);
+    const memoryB = (secretApproved.body.memory as { id: string }).id;
+
     // 建一个只被授权项目 A 的代理凭据
     const client = await h.request<{ client: { id: string } }>('POST', '/api/clients', {
       kind: 'cursor',
@@ -304,6 +317,54 @@ test('M04：正文里的注入指令只被当作数据，不改变任何权限�
     const items = (ownProject.body as { items: Array<{ content: string }> }).items;
     assert.equal(items.length, 1);
     assert.equal(items[0]?.content, injection, '注入文本原样保留为数据，没有被解释成指令');
+
+    // 候选自报 project A 不能掩盖 targetMemoryId 实际属于 project B。
+    const crossProjectProposal = await h.anonymous(
+      'POST',
+      '/api/agent/memory_propose',
+      {
+        operation: 'update',
+        targetMemoryId: memoryB,
+        baseVersion: 1,
+        scope: 'project',
+        projectId: projectA,
+        kind: 'fact',
+        title: '伪装成 A 项目的更新',
+        content: '不能借此读取或更新 B 项目的内容',
+        sourceKind: 'agent_proposal',
+      },
+      { authorization: `Bearer ${token}` },
+    );
+    assert.equal(crossProjectProposal.status, 403);
+    assert.match(
+      String((crossProjectProposal.body as { error: { message: string } }).error.message),
+      /未被授权访问项目/,
+    );
+
+    // 服务层也必须拒绝不一致引用，不能只依赖代理专用路由。
+    const mismatchedUserProposal = await h.request('POST', '/api/memory-proposals', {
+      operation: 'update',
+      targetMemoryId: memoryB,
+      baseVersion: 1,
+      scope: 'project',
+      projectId: projectA,
+      kind: 'fact',
+      title: '错误项目引用',
+      content: '目标实际属于 B',
+      sourceKind: 'manual_input',
+      evidenceStatus: 'verified',
+    });
+    assert.equal(mismatchedUserProposal.status, 400);
+    assert.match(
+      String((mismatchedUserProposal.body as { error: { message: string } }).error.message),
+      /与候选声明.*不一致/,
+    );
+
+    // 候选队列包含待审正文与来源，只允许用户会话读取。
+    const proposalQueue = await h.anonymous('GET', '/api/memory-proposals', undefined, {
+      authorization: `Bearer ${token}`,
+    });
+    assert.equal(proposalQueue.status, 403);
 
     // 越权删除尝试：凭据根本调不到审批/删除接口
     const tryReview = await h.anonymous(
@@ -453,11 +514,12 @@ test('M01 守卫：AI 提案时身份来自凭据，不来自参数里的 client
     );
     assert.equal(detail.body.reviewAllowed, true, '用户会话可以审批');
 
-    // 同样的读取用凭据调，reviewAllowed 必须是 false
+    // 审核详情含候选来源、差异和目标正文，代理凭据不能读取。
     const asCredential = await h.anonymous('GET', `/api/memory-proposals/${proposalId}`, undefined, {
       authorization: `Bearer ${credential.body.token}`,
     });
-    assert.equal((asCredential.body as { reviewAllowed: boolean }).reviewAllowed, false);
+    assert.equal(asCredential.status, 403);
+    assert.match(String((asCredential.body as { error: { message: string } }).error.message), /代理凭据/);
   } finally {
     h.close();
   }
@@ -527,6 +589,39 @@ test('候选导入（粘贴模式）：生成 pending 候选，不声称已同�
     // 正式库仍然为空
     const memories = await h.request<{ total: number }>('GET', `/api/memories?projectId=${projectId}`);
     assert.equal(memories.body.total, 0);
+  } finally {
+    h.close();
+  }
+});
+
+test('候选导入 dry-run 与真实导入共用校验，不会把无效默认项目预报为成功', async () => {
+  const h = await createHarness();
+  try {
+    const input = {
+      fileName: 'invalid-project.json',
+      content: JSON.stringify([{ title: '无效项目候选', content: '正文', scope: 'project' }]),
+      projectMapping: {},
+      defaultProjectId: 'proj_does_not_exist',
+    };
+
+    const dryRun = await h.request<{
+      created: Array<{ proposalId: string }>;
+      rejected: Array<{ reason: string }>;
+    }>('POST', '/api/memory-proposals/import', { ...input, dryRun: true });
+    const real = await h.request<{
+      created: Array<{ proposalId: string }>;
+      rejected: Array<{ reason: string }>;
+    }>('POST', '/api/memory-proposals/import', { ...input, dryRun: false });
+
+    assert.equal(dryRun.status, 200);
+    assert.equal(real.status, 200);
+    assert.equal(dryRun.body.created.length, 0);
+    assert.equal(real.body.created.length, 0);
+    assert.match(dryRun.body.rejected[0]?.reason ?? '', /项目不存在/);
+    assert.equal(dryRun.body.rejected[0]?.reason, real.body.rejected[0]?.reason);
+
+    const queue = await h.request<{ items: unknown[] }>('GET', '/api/memory-proposals?status=pending');
+    assert.equal(queue.body.items.length, 0, 'dry-run 和失败的真实导入都没有留下候选');
   } finally {
     h.close();
   }

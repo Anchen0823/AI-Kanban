@@ -1,6 +1,6 @@
 {
   "name": "@aicc/server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "本地单用户服务：SQLite 主库、HTTP API、导入、审核、导出、备份",
   "type": "module",
@@ -13,7 +13,8 @@
     "test": "node --disable-warning=ExperimentalWarning --import tsx --test \"test/*.test.ts\""
   },
   "dependencies": {
-    "@aicc/core": "0.1.0",
-    "fastify": "5.12.5"
+    "@aicc/core": "0.2.0",
+    "fastify": "5.12.5",
+    "fflate": "^0.8.3"
   }
 }
