@@ -5,6 +5,8 @@ node_modules/
 
 # --- 构建产物 ---
 dist/
+release/
+.desktop-runtime/
 build/
 *.tsbuildinfo
 .vite/

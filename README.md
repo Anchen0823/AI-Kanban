@@ -21,6 +21,12 @@
 
 ## 快速开始
 
+### Windows 桌面版
+
+双击 `release/AI-Control-Center-0.2.0-x64.exe` 即可使用，内置运行时、自动配对，关窗后自动停止服务。从源码运行：`npm run desktop`；生成便携版：`npm run desktop:pack`。数据默认保存在 `%APPDATA%/AI Control Center/data`，现有网页数据的接入方式和验证命令见 [桌面版说明](./docs/07-desktop.md)。
+
+### 网页版
+
 > **不知道从哪下手？** 直接看 [`docs/04-how-to-use.md`](./docs/04-how-to-use.md)——
 > 那份文档只回答「第一步做什么、第二步做什么」，不含设计动机。
 

@@ -1,0 +1,9 @@
+{
+  "name": "@aicc/desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "AI Control Center Windows 桌面端",
+  "author": "AI Control Center contributors",
+  "type": "module",
+  "main": "main.cjs"
+}

@@ -196,6 +196,10 @@ export function App(): ReactNode {
             <button
               className="ghost"
               onClick={async () => {
+                if (new URLSearchParams(window.location.search).get('desktop') === '1') {
+                  window.close();
+                  return;
+                }
                 try {
                   await api.delete('/api/session');
                   await loadSession();
@@ -204,7 +208,7 @@ export function App(): ReactNode {
                 }
               }}
             >
-              退出配对
+              {new URLSearchParams(window.location.search).get('desktop') === '1' ? '退出应用' : '退出配对'}
             </button>
           </div>
         </header>

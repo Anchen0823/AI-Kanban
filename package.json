@@ -20,10 +20,17 @@
     "test": "npm run test -w @aicc/core && npm run test -w @aicc/server && npm run test -w @aicc/mcp && npm run test -w @aicc/web",
     "start": "npm run start -w @aicc/server",
     "verify:sqlite": "node scripts/verify-sqlite.mjs",
-    "verify:smoke": "node scripts/smoke.mjs"
+    "verify:smoke": "node scripts/smoke.mjs",
+    "desktop": "npm run build && node scripts/desktop.mjs",
+    "desktop:prepare": "node scripts/prepare-desktop.mjs",
+    "desktop:pack": "npm run build && npm run desktop:prepare && electron-builder --config electron-builder.cjs --win --x64 --publish never",
+    "test:desktop": "node --test apps/desktop/test/*.test.mjs",
+    "verify:desktop": "node scripts/verify-desktop.mjs"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
+    "electron": "44.4.3",
+    "electron-builder": "26.15.3",
     "tsx": "4.23.13",
     "typescript": "7.0.2"
   }
