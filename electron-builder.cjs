@@ -16,5 +16,8 @@ module.exports = {
   asar: true, npmRebuild: false,
   electronDist: 'node_modules/electron/dist',
   win: { target: ['portable'], icon: 'apps/desktop/assets/icon.ico', signExecutable: false },
+  // In the pinned builder's NsisTarget implementation, true omits UNPACK_DIR_NAME
+  // and uses a unique $PLUGINSDIR per launch (avoids deleting a running instance).
+  portable: { unpackDirName: true, useZip: true },
   artifactName: 'AI-Control-Center-${version}-${arch}.${ext}',
 };

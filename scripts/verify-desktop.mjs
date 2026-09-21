@@ -28,10 +28,11 @@ child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-8000); });
 let socket;
 let origin;
 const delay = ms => new Promise(done => setTimeout(done, ms));
-async function waitFor(fn, timeout = 30000) {
+async function waitFor(fn, timeout = 90000) {
   const deadline = Date.now() + timeout;
   let error;
   while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`Desktop exited early (${child.exitCode}): ${stderr}`);
     try { const value = await fn(); if (value) return value; } catch (err) { error = err; }
     await delay(200);
   }

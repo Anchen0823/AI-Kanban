@@ -1,6 +1,6 @@
 # Windows 桌面端
 
-Windows x64 便携版位于 `release/AI-Control-Center-0.2.0-x64.exe`，双击即可运行，不需要额外安装 Node 或手动启动服务。首次解压可能需要几秒钟。也可运行 `release/win-unpacked/AI Control Center.exe`，分享此目录时必须保留全部文件。
+Windows x64 便携版位于 `release/AI-Control-Center-0.2.0-x64.exe`，双击即可运行，不需要额外安装 Node 或手动启动服务。便携版启动时需要解压，请稍等窗口出现；每次启动使用独立临时目录，避免干扰已运行的实例。经常使用时可直接运行 `release/win-unpacked/AI Control Center.exe`，省去重复解压，分享此目录时必须保留全部文件。
 
 桌面版复用现有的用量总览、导入、额度、记忆、备份和 MCP 功能。主进程启动随包携带的 Node 服务，通过私有 IPC 获取一次性配对码，完成原有 HTTP 配对，再把 HttpOnly 会话 Cookie 写入隔离的桌面浏览器。页面不能访问 Node，窗口启用 sandbox 和 contextIsolation，拒绝外部跳转、弹窗和设备权限。
 
