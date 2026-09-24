@@ -79,6 +79,23 @@ try {
     await delay(400);
     assert.equal(await evaluate(`document.body.innerText.includes('加载失败')`), false);
   }
+  if (process.env.AICC_VERIFY_WORKBUDDY === '1') {
+    const clickSync = `(() => { const b = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '同步 WorkBuddy'); if (!b || b.disabled) return false; b.click(); return true; })()`;
+    assert.equal(await evaluate(clickSync), true);
+    await waitFor(() => evaluate(`document.querySelector('[aria-label="WorkBuddy 历史用量"]').innerText.includes('已扫描')`));
+    const first = await evaluate(`fetch('/api/history/workbuddy').then(r => r.json())`);
+    assert.equal(first.status, 'ok');
+    assert.ok(first.totals.totalTokens > 0);
+    assert.equal(await evaluate(clickSync), true);
+    await waitFor(() => evaluate(`!document.querySelector('[aria-label="WorkBuddy 历史用量"] button').disabled`));
+    const second = await evaluate(`fetch('/api/history/workbuddy').then(r => r.json())`);
+    assert.equal(second.totals.totalTokens, first.totals.totalTokens);
+    const total = await evaluate(`fetch('/api/history/total').then(r => r.json())`);
+    assert.equal(total.sources.find(source => source.id === 'workbuddy').totalTokens, first.totals.totalTokens);
+    assert.equal(total.totalTokens, first.totals.totalTokens);
+    console.log(JSON.stringify({ workbuddy: { totals: first.totals, sessionCount: first.sessionCount, modelCount: first.byModel.length, firstAt: first.firstAt, lastAt: first.lastAt, warnings: first.warnings } }));
+    await evaluate(`document.querySelector('[aria-label="WorkBuddy 历史用量"]').scrollIntoView({block:'center'})`);
+  }
   const screenshot = await command('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(output, 'desktop.png'), Buffer.from(screenshot.data, 'base64'));
   const text = await evaluate('document.body.innerText');

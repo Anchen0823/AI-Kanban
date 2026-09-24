@@ -4,6 +4,7 @@ import type { WorkspaceScope } from '../db/repos/workspace.js';
 import type { ServiceContext } from '../service-context.js';
 import { getCodexHistory } from './codex-history.js';
 import { getDeepseekHistory } from './deepseek-history.js';
+import { getWorkbuddyHistory } from './workbuddy-history.js';
 import { importedHistory } from './history-imported.js';
 
 export interface HistoryTotalSource {
@@ -121,8 +122,16 @@ export function historyTotal(
   // 示例工作区不得读取或根据真实专用缓存作出任何判断。
   let codexKnown = false;
   let deepseekKnown = false;
+  let workbuddyKnown = false;
   if (workspace === 'real') {
     const codex = getCodexHistory(ctx);
+    const workbuddy = getWorkbuddyHistory(ctx);
+    workbuddyKnown = workbuddy.status === 'ok' && workbuddy.totals.totalTokens !== null;
+    candidates.push({
+      id: 'workbuddy', label: 'WorkBuddy 本机历史', totalTokens: workbuddy.totals.totalTokens,
+      included: workbuddyKnown, reason: workbuddyKnown ? null : '尚无可用的 WorkBuddy 专用历史总量',
+      partial: true, warnings: workbuddy.warnings,
+    });
     codexKnown = codex.status === 'ok' && codex.totals.totalTokens !== null;
     candidates.push({
       id: 'codex',
@@ -149,7 +158,9 @@ export function historyTotal(
 
   for (const provider of imported.providers) {
     let reason: string | null = null;
-    if (provider.provider === 'DeepSeek' && deepseekKnown) {
+    if (workbuddyKnown && /^(?:workbuddy|codebuddy)(?:$|[\s_-])/i.test(provider.provider.trim())) {
+      reason = '已有 WorkBuddy 专用历史，通用导入可能重叠';
+    } else if (provider.provider === 'DeepSeek' && deepseekKnown) {
       reason = '已有 DeepSeek 官方导出，通用导入可能重叠';
     } else if (importedOverlapsCodex(provider.provider) && codexKnown) {
       reason = '已有 Codex 专用历史，Codex、OpenAI 或未分类导入存在潜在重叠';

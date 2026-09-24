@@ -7,6 +7,8 @@
 它解决的问题是：你在 ChatGPT、Codex、Cursor、WorkBuddy 之间来回切换时，
 用量、额度、项目状态和个人偏好各自留在不同客户端里，彼此之间无法交接。
 
+WorkBuddy 历史用量已支持：在首页点击「同步 WorkBuddy」，读取本机项目日志并加入累计 Token，支持模型和日期明细。无需 MCP 或 API Key，范围说明见 [WorkBuddy 历史用量](./docs/08-workbuddy-history.md)。
+
 本仓库当前实现到设计稿 §16 的 **M1**，分两段看：
 
 - **M0 已交付**：登记 / 用量导入与去重 / 额度快照 / 记忆候选审核与版本 / 上下文包导出 / 备份恢复。
