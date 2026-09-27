@@ -54,7 +54,7 @@ async function connect(code) {
 
 async function openWindow() {
   window = new BrowserWindow({ width: 1440, height: 960, minWidth: 1000, minHeight: 700,
-    title: 'AI Control Center', icon: join(__dirname, 'assets/icon.png'), backgroundColor: '#f5f7fb', show: false,
+    title: 'AI Control Center', icon: join(__dirname, 'assets/icon.png'), backgroundColor: '#f5f6f8', autoHideMenuBar: true, show: false,
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

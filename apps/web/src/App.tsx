@@ -1,26 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, getWorkspace, setWorkspace, type SessionInfo, type Workspace } from './api.js';
 import { Alert, Badge, Modal } from './ui.js';
-import { OverviewPage } from './pages/Overview.js';
-import { UsagePage } from './pages/Usage.js';
-import { MemoryPage } from './pages/Memory.js';
-import { ProjectsPage } from './pages/Projects.js';
-import { BridgePage } from './pages/Bridge.js';
-import { SettingsPage } from './pages/Settings.js';
-
-/**
- * 应用外壳。
- *
- * 两个必须先解决的问题：
- *
- * 1. **配对。** 服务启动时终端打印一次性配对码，浏览器用它换一个 HttpOnly 会话 Cookie。
- *    没有配对就没有任何写权限，连概览也读不到。这不是多余的仪式：本地服务如果默认放行，
- *    任何一个网页都能偷偷调你的接口。
- *
- * 2. **demo 数据持续可见。** 只要库里存在示例数据，顶端就有一条常驻提示，
- *    且提供了一个一键清空入口。设计稿 §8 明确要求 demo 不能污染真实总览。
- */
-
+import { Telemetry } from './pages/Telemetry.js';
 export type PageKey = 'overview' | 'usage' | 'memory' | 'projects' | 'bridge' | 'settings';
 
 export interface PageProps {
@@ -35,275 +16,52 @@ export interface PageProps {
 
 export type ToastTone = 'info' | 'ok' | 'warn' | 'danger';
 
-interface Toast {
-  id: number;
-  text: string;
-  tone: ToastTone;
-}
 
-const NAV: Array<{ key: PageKey; label: string }> = [
-  { key: 'overview', label: '用量总览' },
-  { key: 'usage', label: '用量记录' },
-  { key: 'settings', label: '设置' },
-];
-
-const MORE_NAV: Array<{ key: PageKey; label: string }> = [
-  { key: 'memory', label: '记忆中心' },
-  { key: 'projects', label: '项目' },
-  { key: 'bridge', label: 'ChatGPT 桥接' },
-];
-
-const PAGE_TITLE: Record<PageKey, string> = {
-  overview: '用量总览',
-  usage: '用量记录',
-  memory: '记忆中心',
-  projects: '项目',
-  bridge: 'ChatGPT 桥接',
-  settings: '设置',
-};
 
 export function App(): ReactNode {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
-  const [page, setPage] = useState<PageKey>('overview');
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
-  const [demoCounts, setDemoCounts] = useState<Record<string, number>>({});
-  const [clearingDemo, setClearingDemo] = useState(false);
   const [workspace, setWorkspaceState] = useState<Workspace>(getWorkspace());
-  const [moreOpen, setMoreOpen] = useState(false);
-
-  const toast = useCallback((text: string, tone: ToastTone = 'info') => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, text, tone }]);
-    window.setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
-  }, []);
-
-  const reload = useCallback(() => setRefreshToken((n) => n + 1), []);
-
+  const [hasDemo, setHasDemo] = useState(false);
+  const [motion, setMotion] = useState(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [section, setSection] = useState('overview');
+  const reload = useCallback(() => setRefreshToken(n => n + 1), []);
   const loadSession = useCallback(async () => {
     try {
-      const info = await api.get<SessionInfo>('/api/session');
-      setSession(info);
-      if (info.authenticated) {
-        try {
-          const demo = await api.get<{ hasDemoData: boolean; counts: Record<string, number> }>('/api/demo/status');
-          setDemoCounts(demo.hasDemoData ? demo.counts : {});
-        } catch {
-          setDemoCounts({});
-        }
+      const next = await api.get<SessionInfo>('/api/session');
+      setSession(next); setSessionError(null);
+      if (next.authenticated) {
+        const demo = await api.get<{ hasDemoData: boolean }>('/api/demo/status');
+        setHasDemo(demo.hasDemoData);
       }
-    } catch (err) {
-      setSessionError(err instanceof Error ? err.message : String(err));
-      setSession({ authenticated: false });
-    }
+    } catch (error) { setSessionError(error instanceof Error ? error.message : String(error)); setSession({ authenticated: false }); }
   }, []);
-
+  useEffect(() => { void loadSession(); }, [loadSession]);
+  useEffect(() => { const change = () => setFullscreen(!!document.fullscreenElement); document.addEventListener('fullscreenchange', change); return () => document.removeEventListener('fullscreenchange', change); }, []);
   useEffect(() => {
-    void loadSession();
-  }, [loadSession]);
-
-  const demoTotal = useMemo(() => Object.values(demoCounts).reduce((a, b) => a + b, 0), [demoCounts]);
-
-  const switchWorkspace = useCallback(
-    (next: Workspace) => {
-      setWorkspace(next);
-      setWorkspaceState(next);
-      setPage('overview');
-      reload();
-    },
-    [reload],
-  );
-
-  if (session === null) {
-    return <div className="gate faint">正在读取本机会话…</div>;
-  }
-
-  if (!session.authenticated) {
-    return <PairGate hint={session.hint} error={sessionError} onPaired={loadSession} />;
-  }
-
-  const forbidden = new Set(session.forbiddenActions ?? []);
-
-  return (
-    <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-name">AI Control Center</span>
-          <span className="brand-sub">AI 用量工作台</span>
-        </div>
-        <nav className="nav">
-          {NAV.map((item) => (
-            <button
-              key={item.key}
-              className={`nav-item${page === item.key ? ' active' : ''}`}
-              onClick={() => setPage(item.key)}
-            >
-              <span>{item.label}</span>
-            </button>
-          ))}
-          <details
-            className="nav-more"
-            open={moreOpen || MORE_NAV.some((item) => item.key === page)}
-            onToggle={(event) => setMoreOpen((event.currentTarget as HTMLDetailsElement).open)}
-          >
-            <summary className="nav-item">更多工具</summary>
-            <div className="nav-subitems">
-              {MORE_NAV.map((item) => (
-                <button
-                  key={item.key}
-                  className={`nav-item nav-subitem${page === item.key ? ' active' : ''}`}
-                  onClick={() => setPage(item.key)}
-                >
-                  <span>{item.label}</span>
-                </button>
-              ))}
-            </div>
-          </details>
-        </nav>
-        <div className="sidebar-foot">
-          <span><span className="dot ok" /> 本地连接</span>
-          {forbidden.size > 0 ? <span className="warn-text">受限：审批 / 删除 / 连接管理不可用</span> : null}
-        </div>
-      </aside>
-
-      <main className="main">
-        <header className="page-head">
-          <div>
-            <h1>{PAGE_TITLE[page]}</h1>
-            {page !== 'overview' && page !== 'usage' ? <PageSubtitle page={page} /> : null}
-          </div>
-          <div className="page-actions">
-            {demoTotal > 0 ? (
-              <div className="pill-group" title="示例数据独立存放，永不进入真实统计">
-                <button
-                  className={`tag-btn${workspace === 'real' ? ' active' : ''}`}
-                  onClick={() => switchWorkspace('real')}
-                >
-                  真实数据
-                </button>
-                <button
-                  className={`tag-btn${workspace === 'demo' ? ' active' : ''}`}
-                  onClick={() => switchWorkspace('demo')}
-                >
-                  示例数据
-                </button>
-              </div>
-            ) : null}
-            <button className="ghost" onClick={reload}>
-              刷新数据
-            </button>
-            <button
-              className="ghost"
-              onClick={async () => {
-                if (new URLSearchParams(window.location.search).get('desktop') === '1') {
-                  window.close();
-                  return;
-                }
-                try {
-                  await api.delete('/api/session');
-                  await loadSession();
-                } catch (err) {
-                  toast(err instanceof Error ? err.message : String(err), 'danger');
-                }
-              }}
-            >
-              {new URLSearchParams(window.location.search).get('desktop') === '1' ? '退出应用' : '退出配对'}
-            </button>
-          </div>
-        </header>
-
-        {workspace === 'demo' ? (
-          <div style={{ marginBottom: 14 }}>
-            <Alert tone="warn" title="正在查看示例数据">
-              <span>合成数据，不计入真实统计。</span>
-              <div className="row tight" style={{ marginTop: 6 }}>
-                <button className="small" onClick={() => switchWorkspace('real')}>
-                  切回真实数据
-                </button>
-              </div>
-            </Alert>
-          </div>
-        ) : null}
-
-        {demoTotal > 0 && workspace === 'real' && page === 'settings' ? (
-          <div style={{ marginBottom: 14 }}>
-            <Alert tone="info" title="示例数据未计入当前统计">
-              <div className="row tight" style={{ marginTop: 6 }}>
-                <button className="small" onClick={() => switchWorkspace('demo')}>
-                  查看示例数据
-                </button>
-                <button
-                  className="small"
-                  disabled={clearingDemo || forbidden.has('demo_reset')}
-                  onClick={async () => {
-                    setClearingDemo(true);
-                    try {
-                      const result = await api.post<{ totalDeleted: number; note: string }>('/api/demo/reset');
-                      toast(`已删除 ${result.totalDeleted} 行示例数据。真实数据未受影响。`, 'ok');
-                      await loadSession();
-                      reload();
-                    } catch (err) {
-                      toast(err instanceof Error ? err.message : String(err), 'danger');
-                    } finally {
-                      setClearingDemo(false);
-                    }
-                  }}
-                >
-                  清空示例数据
-                </button>
-              </div>
-            </Alert>
-          </div>
-        ) : null}
-
-        {page === 'overview' ? (
-          <OverviewPage key={workspace} navigate={setPage} toast={toast} hasDemoData={demoTotal > 0} refreshToken={refreshToken} reload={reload} />
-        ) : null}
-        {page === 'usage' ? (
-          <UsagePage navigate={setPage} toast={toast} hasDemoData={demoTotal > 0} refreshToken={refreshToken} reload={reload} />
-        ) : null}
-        {page === 'memory' ? (
-          <MemoryPage navigate={setPage} toast={toast} hasDemoData={demoTotal > 0} refreshToken={refreshToken} reload={reload} />
-        ) : null}
-        {page === 'projects' ? (
-          <ProjectsPage navigate={setPage} toast={toast} hasDemoData={demoTotal > 0} refreshToken={refreshToken} reload={reload} />
-        ) : null}
-        {page === 'bridge' ? (
-          <BridgePage navigate={setPage} toast={toast} hasDemoData={demoTotal > 0} refreshToken={refreshToken} reload={reload} />
-        ) : null}
-        {page === 'settings' ? (
-          <SettingsPage navigate={setPage} toast={toast} hasDemoData={demoTotal > 0} refreshToken={refreshToken} reload={reload} />
-        ) : null}
-      </main>
-
-      <div style={{ position: 'fixed', right: 18, bottom: 18, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 80, maxWidth: 380 }}>
-        {toasts.map((t) => (
-          <div key={t.id} className={`alert ${t.tone}`}>
-            <span style={{ wordBreak: 'break-word' }}>{t.text}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+    const scroll = () => setSection(['sources','models','activity'].find(id => (document.getElementById(id)?.getBoundingClientRect().top ?? Infinity) <= 150) ?? 'overview');
+    window.addEventListener('scroll', scroll, { passive: true });
+    return () => window.removeEventListener('scroll', scroll);
+  }, []);
+  useEffect(() => { document.documentElement.style.scrollBehavior = motion ? 'smooth' : 'auto'; }, [motion]);
+  function switchWorkspace(next: Workspace) { setWorkspace(next); setWorkspaceState(next); reload(); }
+  if (!session) return <div className="gate faint">正在连接本机观测站…</div>;
+  if (!session.authenticated) return <PairGate hint={session.hint} error={sessionError} onPaired={loadSession} />;
+  return <div className="aqua-app" data-motion={motion ? 'on' : 'off'} id="overview">
+    <div className="ambient-field" aria-hidden="true"><i /><i /><i /></div>
+    <header className="observatory-nav glass">
+      <a className="aqua-brand" href="#overview" aria-label="AI Control Center 首页"><span className="brand-prism" aria-hidden="true">✧</span><span>AI Control Center</span></a>
+      <nav aria-label="统计区块">{[['overview','总览'],['activity','趋势'],['models','模型'],['sources','数据源']].map(([id,label]) => <a key={id} href={`#${id}`} aria-current={section === id ? 'location' : undefined}>{label}</a>)}</nav>
+      <div className="nav-controls"><span className="connection-label"><i className="live-dot" />本地连接</span><button onClick={reload} aria-label="刷新统计" title="重新读取已同步的数据">↻</button><button aria-label="切换界面动效" aria-pressed={motion} onClick={() => setMotion(!motion)} title="切换界面动效">✧</button><button aria-label={fullscreen ? '退出全屏' : '进入全屏'} title={fullscreen ? '退出全屏' : '进入全屏'} onClick={async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { /* Keep the normal desktop window when fullscreen is unavailable. */ } }}>⛶</button></div>
+    </header>
+    <main className="observatory-main">
+      {hasDemo && <div className="workspace-switch"><button aria-pressed={workspace === 'real'} onClick={() => switchWorkspace('real')}>真实数据</button><button aria-pressed={workspace === 'demo'} onClick={() => switchWorkspace('demo')}>示例数据</button>{workspace === 'demo' && <span>正在查看示例数据 · 合成数据不计入真实统计</span>}</div>}
+      <Telemetry key={workspace} refreshToken={refreshToken} reload={reload} />
+    </main>
+  </div>;
 }
-
-function PageSubtitle({ page }: { page: PageKey }): ReactNode {
-  const text: Record<PageKey, string> = {
-    overview: '累计历史用量，查看模型与日期分布。',
-    usage: '查看用量记录、费用与额度快照。',
-    memory: '审核候选，管理正式记忆。',
-    projects: '项目状态与上下文包。',
-    bridge: '在工具之间搬运候选与上下文。',
-    settings: '登记、连接、备份与审计。',
-  };
-  return <div className="sub">{text[page]}</div>;
-}
-
-/* ------------------------------------------------------------------ */
-/* 配对门                                                              */
-/* ------------------------------------------------------------------ */
-
 function PairGate({
   hint,
   error,

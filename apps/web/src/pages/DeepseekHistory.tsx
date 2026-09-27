@@ -20,7 +20,7 @@ export function DeepseekHistory({ refreshToken, onSynced }: {refreshToken: numbe
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    if (!demo) void api.get<History>('/api/history/deepseek').then(value => { if (!cancelled) setData(value); }).catch((e: Error) => { if (!cancelled) setError(e.message); });
+    if (!demo) void api.get<History>('/api/history/deepseek').then(value => { if (!cancelled) { setData(value); setError(null); } }).catch((e: Error) => { if (!cancelled) setError(e.message); });
     return () => { cancelled = true; };
   }, [demo, refreshToken]);
   async function sync(): Promise<void> {
@@ -46,10 +46,10 @@ export function DeepseekHistory({ refreshToken, onSynced }: {refreshToken: numbe
       <div><span title="已包含在输入中">缓存输入</span><strong>{number(data?.totals.cachedInputTokens)}</strong></div>
       <div><span>请求次数</span><strong>{number(data?.totals.requestCount)}</strong></div>
     </div>
-    {!!data?.costs.length && <div className="history-costs"><span>累计消费</span>{data.costs.map(cost => <strong key={cost.currency}>{cost.amount} <small>{cost.currency}</small></strong>)}</div>}
     <p className="history-coverage">{data?.firstAt ? `${data.byDay[0]?.day ?? day(data.firstAt)} — ${data.byDay.at(-1)?.day ?? day(data.lastAt)} · ${data.fileCount} 个导出文件，仅覆盖已提供时段` : demo ? '示例工作区不读取本机导出。' : '尚未读取控制台历史导出。'}</p>
     {error && <div className="detector-error" role="alert">{error}</div>}
     {(data?.status === 'error' || data?.status === 'empty') && <div className="detector-error">{data.message}</div>}
+    {!!data?.warnings.length && <details className="history-coverage"><summary>统计范围与提示</summary>{data.warnings.map(warning => <p key={warning}>{warning}</p>)}</details>}
     {data?.status === 'ok' && <div className="history-breakdown">
       <details><summary>按模型查看</summary><div className="table-wrap"><table><thead><tr><th>模型</th><th>Token</th><th>请求</th></tr></thead><tbody>{[...data.byModel].sort((a, b) => compareModels(a.model, b.model)).map(row => <tr key={row.model}><td>{row.model}</td><td>{number(row.totals.totalTokens)}</td><td>{number(row.totals.requestCount)}</td></tr>)}</tbody></table></div></details>
       <details><summary>按日期查看</summary><div className="table-wrap history-days"><table><thead><tr><th>导出日期</th><th>Token</th><th>请求</th></tr></thead><tbody>{[...data.byDay].sort((a, b) => compareDates(a.day, b.day)).map(row => <tr key={row.day}><td>{row.day}</td><td>{number(row.totals.totalTokens)}</td><td>{number(row.totals.requestCount)}</td></tr>)}</tbody></table></div></details>

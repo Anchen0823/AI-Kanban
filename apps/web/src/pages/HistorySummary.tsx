@@ -25,6 +25,7 @@ const number = (value: number | null | undefined): string => value == null ? '�
 const day = (value: string | null | undefined): string => value ? formatDateTime(value).split(' ')[0]! : '未知';
 
 export function HistorySummary({ navigate, refreshToken }: Pick<PageProps, 'navigate' | 'refreshToken'>): ReactNode {
+  const [source, setSource] = useState('codex');
   const demo = getWorkspace() === 'demo';
   const [history, setHistory] = useState<CodexHistory | null>(null);
   const [imported, setImported] = useState<ImportedHistory | null>(null);
@@ -34,8 +35,8 @@ export function HistorySummary({ navigate, refreshToken }: Pick<PageProps, 'navi
   const [totalRevision, setTotalRevision] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    if (!demo) void api.get<CodexHistory>('/api/history/codex').then(result => { if (!cancelled) setHistory(result); }).catch((e: Error) => { if (!cancelled) setError(e.message); });
-    void api.get<ImportedHistory>('/api/history/imported').then(result => { if (!cancelled) setImported(result); }).catch((e: Error) => { if (!cancelled) setImportError(e.message); });
+    if (!demo) void api.get<CodexHistory>('/api/history/codex').then(result => { if (!cancelled) { setHistory(result); setError(null); } }).catch((e: Error) => { if (!cancelled) setError(e.message); });
+    void api.get<ImportedHistory>('/api/history/imported').then(result => { if (!cancelled) { setImported(result); setImportError(null); } }).catch((e: Error) => { if (!cancelled) setImportError(e.message); });
     return () => { cancelled = true; };
   }, [demo, refreshToken]);
   async function scan(): Promise<void> {
@@ -45,9 +46,12 @@ export function HistorySummary({ navigate, refreshToken }: Pick<PageProps, 'navi
     finally { setBusy(false); }
   }
   return <section className="history-summary">
-    <div className="history-title"><h2>历史用量</h2></div>
     <AllAiTotal refreshToken={`${refreshToken}:${totalRevision}`} />
+    <div className="source-workspace">
+    <div className="section-heading"><div><h2>数据源明细</h2><p>按来源查看、同步和导入历史用量</p></div><span className="section-index">01 — 05</span></div>
+    <div className="source-tabs" aria-label="选择数据源">{[['codex', 'Codex'], ['deepseek', 'DeepSeek'], ['workbuddy', 'WorkBuddy'], ['opencode', 'OpenCode'], ['minimax', 'MiniMax Code']].map(([id, label]) => <button key={id} aria-pressed={source === id} className={source === id ? 'active' : ''} onClick={() => setSource(id!)}>{label}</button>)}</div>
     <div className="history-provider-grid">
+    <div hidden={source !== 'codex'}>
     <section className="history-primary" aria-label="Codex 历史用量">
       <div className="history-source-title"><h3><span className="source-icon" aria-hidden="true">C</span>Codex</h3><button className="primary" disabled={demo || busy} onClick={() => void scan()}>{busy ? '同步中…' : '同步 Codex'}</button></div>
       <div className="history-total"><span>累计 Token</span><strong>{number(history?.totals.totalTokens)}</strong></div>
@@ -60,16 +64,19 @@ export function HistorySummary({ navigate, refreshToken }: Pick<PageProps, 'navi
       <div className="history-coverage">{history?.firstAt ? `${day(history.firstAt)} — ${day(history.lastAt)} · ${number(history.sessionCount)} 个会话` : demo ? '示例工作区不读取本机历史。' : '点击同步，读取本机已保留的全部 Codex 历史。'}</div>
       {error && <div className="detector-error" role="alert">{error}</div>}
       {history?.status === 'error' || history?.status === 'empty' ? <div className="detector-error" role="status">{history.message}</div> : null}
+      {!!history?.warnings.length && <details className="history-coverage"><summary>统计范围与提示</summary>{history.warnings.map(warning => <p key={warning}>{warning}</p>)}</details>}
       {history && history.byModel.length > 0 && <div className="history-breakdown">
         <details><summary>按模型查看</summary><div className="table-wrap"><table><thead><tr><th>模型</th><th>Token</th><th>会话</th></tr></thead><tbody>{[...history.byModel].sort((a, b) => compareModels(a.model, b.model)).map(row => <tr key={row.model}><td>{row.model}</td><td>{number(row.totals.totalTokens)}</td><td>{number(row.sessionCount)}</td></tr>)}</tbody></table></div></details>
         <details><summary>按日期查看</summary><div className="history-days table-wrap"><table><thead><tr><th>日期（UTC）</th><th>Token</th><th>会话</th></tr></thead><tbody>{[...history.byDay].sort((a, b) => compareDates(a.day, b.day)).map(row => <tr key={row.day}><td>{row.day}</td><td>{number(row.totals.totalTokens)}</td><td>{number(row.sessionCount)}</td></tr>)}</tbody></table></div></details>
       </div>}
     </section>
-    <DeepseekHistory refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
-    <WorkbuddyHistory refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
-    <WorkbuddyHistory source="opencode" refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
-    <WorkbuddyHistory source="minimax" refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
     </div>
+    <div hidden={source !== 'deepseek'}><DeepseekHistory refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
+    </div><div hidden={source !== 'workbuddy'}><WorkbuddyHistory refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
+    </div><div hidden={source !== 'opencode'}><WorkbuddyHistory source="opencode" refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
+    </div><div hidden={source !== 'minimax'}><WorkbuddyHistory source="minimax" refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
+    </div>
+    </div></div>
     {!!(imported?.count || importError) && <section className="history-imported" aria-label="其他导入记录">
       <div className="history-source-title"><h3>其他导入记录</h3><button onClick={() => navigate('usage')}>查看记录 →</button></div>
       {importError && <div className="detector-error" role="alert">{importError}</div>}

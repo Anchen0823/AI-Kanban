@@ -66,7 +66,8 @@ try {
     if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
     return result.result.value;
   }
-  await waitFor(() => evaluate(`document.body.innerText.includes('用量总览') && document.querySelectorAll('button').length > 3`));
+  await command('Input.setIgnoreInputEvents', {ignore:true});
+  await waitFor(() => evaluate(`document.body.innerText.includes('用量统计') && document.querySelectorAll('button').length > 3`));
   assert.equal(await evaluate(`fetch('/api/session').then(r=>r.json()).then(r=>r.authenticated)`), true);
   assert.equal(await evaluate(`typeof window.require`), 'undefined');
   assert.equal(await evaluate(`typeof window.process`), 'undefined');
@@ -74,77 +75,128 @@ try {
   const second = spawn(executable, process.argv[2] ? [] : ['apps/desktop'], { env, stdio: 'ignore', windowsHide: true });
   const [secondCode] = await once(second, 'exit');
   assert.equal(secondCode, 0, 'Second instance should exit and focus the first window');
-  for (const label of ['用量记录', '设置', '用量总览']) {
-    assert.equal(await evaluate(`(() => { const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(label)}); if (!button) return false; button.click(); return true; })()`), true);
-    await delay(400);
-    assert.equal(await evaluate(`document.body.innerText.includes('加载失败')`), false);
-  }
-  if (process.env.AICC_VERIFY_WORKBUDDY === '1') {
-    const clickSync = `(() => { const b = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '同步 WorkBuddy'); if (!b || b.disabled) return false; b.click(); return true; })()`;
-    assert.equal(await evaluate(clickSync), true);
-    await waitFor(() => evaluate(`document.querySelector('[aria-label="WorkBuddy 历史用量"]').innerText.includes('已扫描')`));
-    const first = await evaluate(`fetch('/api/history/workbuddy').then(r => r.json())`);
-    assert.equal(first.status, 'ok');
-    assert.ok(first.totals.totalTokens > 0);
-    assert.equal(await evaluate(clickSync), true);
-    await waitFor(() => evaluate(`!document.querySelector('[aria-label="WorkBuddy 历史用量"] button').disabled`));
-    const second = await evaluate(`fetch('/api/history/workbuddy').then(r => r.json())`);
-    assert.equal(second.totals.totalTokens, first.totals.totalTokens);
-    const total = await evaluate(`fetch('/api/history/total').then(r => r.json())`);
-    assert.equal(total.sources.find(source => source.id === 'workbuddy').totalTokens, first.totals.totalTokens);
-    assert.equal(total.totalTokens, first.totals.totalTokens);
-    console.log(JSON.stringify({ workbuddy: { totals: first.totals, sessionCount: first.sessionCount, modelCount: first.byModel.length, firstAt: first.firstAt, lastAt: first.lastAt, warnings: first.warnings } }));
-    await evaluate(`document.querySelector('[aria-label="WorkBuddy 历史用量"]').scrollIntoView({block:'center'})`);
-  }
-  if (process.env.AICC_VERIFY_OPENCODE === '1') {
-    const selector = '[aria-label="OpenCode 历史用量"]';
-    assert.equal(await evaluate(`(() => { const b = document.querySelector(${JSON.stringify(selector)}+' button'); if (!b || b.disabled || !b.textContent.includes('同步')) return false; b.click(); return true; })()`), true);
-    await waitFor(() => evaluate(`!document.querySelector(${JSON.stringify(selector)}+' button').disabled`));
-    await waitFor(() => evaluate(`fetch('/api/history/opencode').then(r=>r.json()).then(r=>r.checkedAt !== null)`));
-    const first = await evaluate(`fetch('/api/history/opencode').then(r=>r.json())`);
-    assert.equal(first.status, 'ok'); assert.ok(first.totals.totalTokens > 0);
-    await evaluate(`document.querySelector(${JSON.stringify(selector)}+' button').click()`);
-    await waitFor(() => evaluate(`!document.querySelector(${JSON.stringify(selector)}+' button').disabled`));
-    const second = await evaluate(`fetch('/api/history/opencode').then(r=>r.json())`);
-    assert.deepEqual(second.totals, first.totals);
-    const total = await evaluate(`fetch('/api/history/total').then(r=>r.json())`);
-    assert.equal(total.sources.find(source => source.id === 'opencode').included, true);
-    assert.equal(total.sources.some(source => source.id === 'doubao'), false);
-    assert.equal(await evaluate(`document.querySelector('[aria-label="豆包工作 历史用量"]') === null`), true);
-    console.log(JSON.stringify({ client: 'opencode', totalTokens: first.totals.totalTokens, sessionCount: first.sessionCount }));
-    await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'})`);
+  await command('Input.setIgnoreInputEvents', {ignore:true});
+
+  const runtimeErrors = [];
+  socket.addEventListener('message', event => { const message = JSON.parse(event.data); if (message.method === 'Runtime.exceptionThrown') runtimeErrors.push(message.params); });
+  await command('Runtime.enable');
+  await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1080, deviceScaleFactor: 1, mobile: false });
+  async function capture(name) {
     const shot = await command('Page.captureScreenshot', { format: 'png' });
-    writeFileSync(join(output, 'opencode.png'), Buffer.from(shot.data, 'base64'));
+    writeFileSync(join(output, name), Buffer.from(shot.data, 'base64'));
   }
-  if (process.env.AICC_VERIFY_MINIMAX === '1') {
-    const selector = '[aria-label="MiniMax Code 历史用量"]';
-    assert.equal(await evaluate(`(() => { const b = document.querySelector(${JSON.stringify(selector)}+' button'); if (!b || b.disabled || !b.textContent.includes('同步')) return false; b.click(); return true; })()`), true);
-    await waitFor(() => evaluate(`!document.querySelector(${JSON.stringify(selector)}+' button').disabled`));
-    await waitFor(() => evaluate(`fetch('/api/history/minimax').then(r=>r.json()).then(r=>r.checkedAt !== null)`));
-    const first = await evaluate(`fetch('/api/history/minimax').then(r=>r.json())`);
-    assert.equal(first.status, 'ok'); assert.ok(first.totals.totalTokens > 0);
-    await evaluate(`document.querySelector(${JSON.stringify(selector)}+' button').click()`);
-    await waitFor(() => evaluate(`!document.querySelector(${JSON.stringify(selector)}+' button').disabled`));
-    const second = await evaluate(`fetch('/api/history/minimax').then(r=>r.json())`);
-    assert.deepEqual(second.totals, first.totals);
-    const total = await evaluate(`fetch('/api/history/total').then(r=>r.json())`);
-    assert.equal(total.sources.find(source => source.id === 'minimax').included, true);
-    assert.equal(total.sources.some(source => source.id === 'doubao'), false);
-    assert.equal(await evaluate(`document.querySelector('[aria-label="豆包工作 历史用量"]') === null`), true);
-    console.log(JSON.stringify({ client: 'minimax', totalTokens: first.totals.totalTokens, sessionCount: first.sessionCount }));
-    await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'})`);
-    const shot = await command('Page.captureScreenshot', { format: 'png' });
-    writeFileSync(join(output, 'minimax.png'), Buffer.from(shot.data, 'base64'));
+  async function clickLabel(label) {
+    assert.equal(await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(label)} && b.getClientRects().length); if (!b || b.disabled) return false; b.click(); return true; })()`), true, label);
+    await delay(120);
   }
-  const screenshot = await command('Page.captureScreenshot', { format: 'png' });
-  writeFileSync(join(output, 'desktop.png'), Buffer.from(screenshot.data, 'base64'));
-  const text = await evaluate('document.body.innerText');
-  writeFileSync(join(output, 'window-text.txt'), text);
+  await waitFor(() => evaluate(`document.querySelector('.telemetry')?.getAttribute('aria-busy') === 'false'`));
+  assert.equal(await evaluate(`/用量明细|数据设置|更多工具|收费流水/.test(document.body.innerText)`), false);
+  assert.equal(await evaluate(`document.querySelectorAll('.kpi').length`), 4);
+  assert.equal(await evaluate(`fetch('/api/history/total').then(r => r.json()).then(r => r.totalTokens)`), null, 'Fresh test profile must contain no usage');
+  await capture('aqua-empty.png');
+  // A real isolated database is populated via public APIs; these are QA fixtures, never user data.
+  async function post(path, body) {
+    return evaluate(`fetch(${JSON.stringify(path)}, {method:'POST', headers:{'content-type':'application/json','x-aicc-request':'1'}, body:JSON.stringify(${JSON.stringify(body)})}).then(async r => {const body=await r.json(); if(!r.ok) throw new Error(JSON.stringify(body)); return body;})`);
+  }
+  let expectedTotal = 0;
+  for (const [index, provider] of ['OpenAI', 'DeepSeek', 'Anthropic'].entries()) {
+    const account = await post('/api/accounts', { provider, alias: provider + ' QA', currency:'USD' });
+    const rows = ['occurred_at,request_id,model,input_tokens,output_tokens,cached_tokens,reasoning_tokens'];
+    for (let day=0;day<90;day++) {
+      if (day % 11 === 0) continue;
+      const date = new Date(Date.UTC(2026,6,1+day)).toISOString();
+      const input = Math.floor((100000+day*2400+Math.sin(day*.7+index)*60000)/(index+1));
+      const output = Math.floor(input*.23);
+      expectedTotal += input+output;
+      const model = [['gpt-5.4','gpt-5.4-mini'],['deepseek-v3','deepseek-r1'],['claude-sonnet','claude-opus']][index][day%2];
+      rows.push([date,provider+'-qa-'+day,model,input,output,Math.floor(input*.68),Math.floor(output*.26)].join(','));
+    }
+    const result = await post('/api/imports', { kind:'usage_csv',fileName:provider+'-qa.csv',accountId:account.account.id,content:rows.join('\n') });
+    assert.equal(result.acceptedRows,81);
+  }
+  await evaluate(`document.querySelector('[aria-label="刷新统计"]').click()`);
+  try {
+    await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.getAttribute('title') === ${JSON.stringify(expectedTotal.toLocaleString('zh-CN'))}`), 15000);
+  } catch (error) {
+    console.error('Fixture mismatch', {expectedTotal, actual: await evaluate(`document.querySelector('.hero-kpi .kpi-value')?.title`), total: await evaluate(`fetch('/api/history/total').then(r => r.json())`), notices: await evaluate(`document.querySelector('.telemetry-notice')?.textContent`)});
+    await capture('aqua-failure.png');
+    throw error;
+  }
+  assert.equal(await evaluate(`document.querySelectorAll('.donut-legend button').length`),3);
+  assert.equal(await evaluate(`document.querySelectorAll('.model-rank').length`),6);
+  assert.match(await evaluate(`document.querySelector('.trend-meta strong').textContent`), /^[\d,]+$/);
+  await capture('aqua-dashboard.png');
+  for (const label of ['7 天','90 天','全部','30 天']) await clickLabel(label);
+  await clickLabel('柱状');
+  assert.equal(await evaluate(`!!document.querySelector('svg[aria-label="每日 Token 柱状图"]')`),true);
+  await capture('aqua-bars.png');
+  await clickLabel('曲线');
+  await clickLabel('表格');
+  assert.equal(await evaluate(`document.querySelectorAll('.model-panel tbody tr').length`),6);
+  await clickLabel('排行');
+  assert.equal(await evaluate(`document.querySelector('.hero-kpi .kpi-value').textContent`),expectedTotal.toLocaleString('zh-CN'));
+  await evaluate(`document.querySelector('.donut-legend button').click()`);
+  await delay(100);
+  assert.notEqual(await evaluate(`document.querySelector('select[aria-label="统计来源"]').value`),'all');
+  assert.equal(await evaluate(`document.querySelectorAll('.model-rank').length`),2);
+  await evaluate(`document.querySelector('.donut-legend button.selected').click()`);
+  await delay(100);
+  assert.equal(await evaluate(`document.querySelector('select[aria-label="统计来源"]').value`),'all');
+  await evaluate(`document.querySelector('[aria-label="切换界面动效"]').click()`);
+  await delay(100);
+  assert.equal(await evaluate(`document.querySelector('.aqua-app').dataset.motion`),'off');
+  await clickLabel('读取历史导出 ↗');
+  assert.equal(await evaluate(`!!document.querySelector('#deepseek-directory')`),true);
+  await clickLabel('读取历史导出 ↗');
+  await evaluate(`document.querySelector('.methodology').open = true; document.querySelector('#sources').scrollIntoView()`);
+  await delay(100);
+  await capture('aqua-sources.png');
+  await evaluate(`document.querySelector('.methodology').open = false; window.scrollTo(0,0)`);
+  for (const width of [1000, 390]) {
+    await command('Emulation.setDeviceMetricsOverride', {width,height:1000,deviceScaleFactor:1,mobile:false});
+    await delay(150);
+    assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`),true,'No overflow at '+width);
+    if (width === 390) {
+      assert.match(await evaluate(`document.querySelector('.hero-kpi .kpi-value').textContent`), /[KMB]$/);
+      assert.equal(await evaluate(`document.querySelector('.hero-kpi .kpi-value').title`), expectedTotal.toLocaleString('zh-CN'));
+    }
+    await capture('aqua-'+width+'.png');
+  }
+  await command('Emulation.setDeviceMetricsOverride', {width:1440,height:1080,deviceScaleFactor:1,mobile:false});
+  await delay(150);
+  assert.equal(await evaluate(`document.querySelector('.hero-kpi .kpi-value').textContent`),expectedTotal.toLocaleString('zh-CN'));
+  assert.equal(runtimeErrors.length,0,JSON.stringify(runtimeErrors));
+  await post('/api/demo/seed',{});
+  await evaluate('location.reload()');
+  await waitFor(() => evaluate(`!!document.querySelector('.workspace-switch')`));
+  await clickLabel('示例数据');
+  await waitFor(() => evaluate(`document.querySelector('.telemetry')?.getAttribute('aria-busy') === 'false'`));
+  assert.equal(await evaluate(`document.body.innerText.includes('合成数据不计入真实统计')`),true);
+  assert.equal(await evaluate(`document.querySelector('.deck-actions .sync-button').disabled`),true);
+  assert.notEqual(await evaluate(`document.querySelector('.hero-kpi .kpi-value').getAttribute('title')`),expectedTotal.toLocaleString('zh-CN'));
+  await clickLabel('真实数据');
+  await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.getAttribute('title') === ${JSON.stringify(expectedTotal.toLocaleString('zh-CN'))}`));
+  const beforeSync = await evaluate(`fetch('/api/history/total').then(r => r.json())`);
+  const deepseekImport = beforeSync.sources.find(source => source.id === 'imported:DeepSeek').totalTokens;
+  const exportDirectory = join(profile, 'deepseek-export');
+  mkdirSync(exportDirectory, {recursive:true});
+  writeFileSync(join(exportDirectory, 'amount-2026-09-01_2026-09-30.csv'), [
+    'user_id,start_time_iso,end_time_iso,model,api_key_name,api_key,type,price,amount',
+    ...[['input_cache_hit_tokens',13],['input_cache_miss_tokens',20],['output_tokens',5]].map(([type, amount]) => `qa,2026-09-01T00:00:00+08:00,2026-09-02T00:00:00+08:00,deepseek-chat,qa,qa,${type},0,${amount}`),
+  ].join('\n'));
+  await clickLabel('读取历史导出 ↗');
+  await evaluate(`(() => { const input = document.querySelector('#deepseek-directory'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(exportDirectory)}); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+  await delay(100);
+  await clickLabel('读取并统计');
+  await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.getAttribute('title') === ${JSON.stringify((expectedTotal-deepseekImport+38).toLocaleString('zh-CN'))}`));
+  assert.equal(await evaluate(`fetch('/api/history/total').then(r => r.json()).then(r => r.sources.find(s => s.id === 'imported:DeepSeek').included)`), false);
+  console.log('PASS: DeepSeek UI collection refreshes the dashboard and excludes overlapping generic imports.');
+  console.log('PASS: aqua single-screen UI, real API fixture totals, trend ranges and chart switching, model views, source filtering, full numbers, reduced motion, DeepSeek collection, source coverage, 1000px/390px layouts, demo isolation, zero renderer errors.');
   await evaluate('window.close()');
   await Promise.race([exited, delay(10000).then(() => { throw new Error('Desktop did not exit'); })]);
   await assert.rejects(fetch(origin));
   console.log('PASS: real desktop auto-login, navigation, renderer isolation, anonymous rejection, screenshot, window close and backend cleanup.');
-  console.log(join(output, 'desktop.png'));
+  console.log(join(output, 'aqua-dashboard.png'));
 } finally {
   socket?.close();
   if (child.exitCode === null) child.kill();

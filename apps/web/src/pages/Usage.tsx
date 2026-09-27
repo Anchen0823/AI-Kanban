@@ -3,11 +3,9 @@ import {
   api,
   workspacePath,
   type AccountRecord,
-  type Charge,
   type ClientRecord,
   type ImportOutcome,
   type ProjectRecord,
-  type QuotaBucket,
   type UsageObservation,
   type UsageTotals,
 } from '../api.js';
@@ -18,11 +16,8 @@ import {
   Card,
   EmptyState,
   Modal,
-  SourceLine,
   Unknown,
   formatDateTime,
-  formatMoneyMinor,
-  formatRelative,
   formatTokens,
   methodLabel,
   qualityLabel,
@@ -30,7 +25,7 @@ import {
 } from '../ui.js';
 
 /**
- * 用量与订阅页。
+ * 用量明细与导入页。
  *
  * 三条界面纪律：
  * 1. 默认只列出**主统计源**。「证据行」和「待确认行」需要显式打开开关才看得到。
@@ -46,7 +41,7 @@ const KIND_FILTERS = [
 ] as const;
 
 export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode {
-  const [tab, setTab] = useState<'usage' | 'charges' | 'quota' | 'import'>('usage');
+  const [tab, setTab] = useState<'usage' | 'import'>('usage');
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
@@ -62,8 +57,6 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
   const [filterQuality, setFilterQuality] = useState<string>('');
   const [detail, setDetail] = useState<UsageObservation | null>(null);
 
-  const [charges, setCharges] = useState<Charge[]>([]);
-  const [quotaBuckets, setQuotaBuckets] = useState<QuotaBucket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -96,27 +89,17 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
     setTotals(result.totals);
   }, [filterKind, filterAccount, filterProject, filterClient, filterQuality, includeNonPrimary]);
 
-  const loadCharges = useCallback(async () => {
-    const result = await api.get<{ charges: Charge[] }>('/api/charges');
-    setCharges(result.charges);
-  }, []);
-
-  const loadQuota = useCallback(async () => {
-    const result = await api.get<{ groups: Array<{ buckets: QuotaBucket[] }> }>('/api/quota');
-    setQuotaBuckets(result.groups.flatMap((g) => g.buckets));
-  }, []);
-
   const reloadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([loadRegistry(), loadUsage(), loadCharges(), loadQuota()]);
+      await Promise.all([loadRegistry(), loadUsage()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [loadRegistry, loadUsage, loadCharges, loadQuota]);
+  }, [loadRegistry, loadUsage]);
 
   useEffect(() => {
     void reloadAll();
@@ -129,13 +112,11 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
   if (error) return <Alert tone="danger" title="加载失败">{error}</Alert>;
 
   return (
-    <div className="stack">
-      <div className="pill-group">
+    <div className="stack usage-page">
+      <div className="page-tabs">
         {(
           [
-            ['quota', '额度快照'],
             ['usage', '用量明细'],
-            ['charges', '收费流水'],
             ['import', '导入数据'],
           ] as const
         ).map(([key, label]) => (
@@ -148,11 +129,11 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
       {tab === 'usage' ? (
         <>
           <Card
-            title="已观测 token"
-            hint="未知值保留为未知"
+            title="已导入用量"
+            hint="仅统计导入记录，本机历史请在用量统计中查看"
             actions={
               <a className="ghost small" href={workspacePath('/api/exports/usage.csv')}>
-                导出 CSV（含公式注入防护）
+                导出 CSV ↗
               </a>
             }
           >
@@ -204,7 +185,7 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
             ) : null}
           </Card>
 
-          <Card title="筛选" hint="默认只看主统计源" tight>
+          <div className="usage-filters" aria-label="筛选用量">
             <div className="row" style={{ gap: 12 }}>
               <div className="pill-group">
                 {KIND_FILTERS.map((f) => (
@@ -217,7 +198,7 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
                   </button>
                 ))}
               </div>
-              <select value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)} style={{ width: 'auto' }}>
+              <select aria-label="账户" value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)} style={{ width: 'auto' }}>
                 <option value="">全部账户</option>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -225,7 +206,7 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
                   </option>
                 ))}
               </select>
-              <select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} style={{ width: 'auto' }}>
+              <select aria-label="项目" value={filterProject} onChange={(e) => setFilterProject(e.target.value)} style={{ width: 'auto' }}>
                 <option value="">全部项目</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -233,7 +214,7 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
                   </option>
                 ))}
               </select>
-              <select value={filterClient} onChange={(e) => setFilterClient(e.target.value)} style={{ width: 'auto' }}>
+              <select aria-label="客户端" value={filterClient} onChange={(e) => setFilterClient(e.target.value)} style={{ width: 'auto' }}>
                 <option value="">全部客户端</option>
                 {clients.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -241,7 +222,7 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
                   </option>
                 ))}
               </select>
-              <select value={filterQuality} onChange={(e) => setFilterQuality(e.target.value)} style={{ width: 'auto' }}>
+              <select aria-label="可信度" value={filterQuality} onChange={(e) => setFilterQuality(e.target.value)} style={{ width: 'auto' }}>
                 <option value="">全部可信度</option>
                 <option value="provider_reported">供应商自报</option>
                 <option value="locally_observed">本机可观测</option>
@@ -257,7 +238,7 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
                 <span>显示证据与待确认行</span>
               </label>
             </div>
-          </Card>
+          </div>
 
           <Card title={`记录（${total} 条）`} hint={includeNonPrimary ? '含证据与待确认行' : '仅主统计源'}>
             {loading && observations.length === 0 ? (
@@ -329,32 +310,6 @@ export function UsagePage({ toast, refreshToken, reload }: PageProps): ReactNode
             )}
           </Card>
         </>
-      ) : null}
-
-      {tab === 'charges' ? (
-        <ChargesPanel
-          accounts={accounts}
-          charges={charges}
-          accountName={accountName}
-          onChanged={async () => {
-            await loadCharges();
-            reload();
-          }}
-          toast={toast}
-        />
-      ) : null}
-
-      {tab === 'quota' ? (
-        <QuotaPanel
-          accounts={accounts}
-          buckets={quotaBuckets}
-          accountName={accountName}
-          onChanged={async () => {
-            await loadQuota();
-            reload();
-          }}
-          toast={toast}
-        />
       ) : null}
 
       {tab === 'import' ? (
@@ -535,429 +490,9 @@ function ObservationDetail({
 }
 
 /* ------------------------------------------------------------------ */
-/* 收费流水                                                            */
+/* 用量导入                                                            */
 /* ------------------------------------------------------------------ */
 
-function ChargesPanel({
-  accounts,
-  charges,
-  accountName,
-  onChanged,
-  toast,
-}: {
-  accounts: AccountRecord[];
-  charges: Charge[];
-  accountName: Map<string, string>;
-  onChanged: () => Promise<void>;
-  toast: PageProps['toast'];
-}): ReactNode {
-  const [form, setForm] = useState({
-    accountId: '',
-    kind: 'api',
-    amount: '',
-    currency: 'CNY',
-    status: 'paid',
-    periodStart: '',
-    billingRef: '',
-    note: '',
-  });
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (): Promise<void> => {
-    if (!form.amount.trim()) {
-      toast('请填写金额', 'warn');
-      return;
-    }
-    setBusy(true);
-    try {
-      const money = parseDecimalToMinor(form.amount.trim(), form.currency);
-      const result = await api.post<{ inserted: boolean; reason?: string }>('/api/charges', {
-        accountId: form.accountId || null,
-        kind: form.kind,
-        amountMinor: money,
-        currency: form.currency,
-        status: form.status,
-        periodStart: form.periodStart || null,
-        billingRef: form.billingRef.trim() || null,
-        note: form.note.trim() || null,
-      });
-      toast(
-        result.inserted ? '已登记。' : `没有重复记账：${result.reason ?? ''}`,
-        result.inserted ? 'ok' : 'warn',
-      );
-      setForm({ ...form, amount: '', billingRef: '', note: '' });
-      await onChanged();
-    } catch (err) {
-      toast(err instanceof Error ? err.message : String(err), 'danger');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="stack">
-      <Card title="登记一笔收费" hint="钱和 token 是两种量纲，分开记">
-        <div className="grid cols-3">
-          <label className="field">
-            <span>账户</span>
-            <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })}>
-              <option value="">不指定</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.alias}（{a.currency}）
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>类型</span>
-            <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
-              <option value="subscription">订阅费</option>
-              <option value="api">按量费用</option>
-              <option value="extra">额外收费</option>
-              <option value="refund">退款</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>状态</span>
-            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-              <option value="paid">已支付</option>
-              <option value="pending">待结算</option>
-              <option value="refunded">已退款</option>
-              <option value="void">已作废</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>金额</span>
-            <input
-              value={form.amount}
-              onChange={(e) => setForm({ ...form, amount: e.target.value })}
-              placeholder="例如 19.99"
-              inputMode="decimal"
-            />
-            <span className="help">按十进制定点存储，不经过浮点。</span>
-          </label>
-          <label className="field">
-            <span>币种</span>
-            <input
-              value={form.currency}
-              onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })}
-              maxLength={3}
-            />
-            <span className="help">RMB 会被归一成 CNY，避免同一笔钱落在两个汇总桶里。</span>
-          </label>
-          <label className="field">
-            <span>账期开始</span>
-            <input
-              type="date"
-              value={form.periodStart}
-              onChange={(e) => setForm({ ...form, periodStart: e.target.value })}
-            />
-            <span className="help">订阅类必填：同一订阅同一周期只记一次。</span>
-          </label>
-          <label className="field">
-            <span>账单号</span>
-            <input
-              value={form.billingRef}
-              onChange={(e) => setForm({ ...form, billingRef: e.target.value })}
-              placeholder="invoice id"
-            />
-            <span className="help">有账单号时，同一账单不会被重复记账。</span>
-          </label>
-          <label className="field" style={{ gridColumn: 'span 2' }}>
-            <span>备注</span>
-            <input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
-          </label>
-        </div>
-        <div className="modal-foot" style={{ border: 'none', paddingTop: 8 }}>
-          <button className="primary" disabled={busy} onClick={() => void submit()}>
-            登记
-          </button>
-        </div>
-      </Card>
-
-      <Card title={`收费记录（${charges.length} 笔）`} hint="按币种分行，不做跨币种相加">
-        {charges.length === 0 ? (
-          <EmptyState kind="connected_no_data" title="还没有登记任何收费记录" />
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>时间</th>
-                  <th>账户</th>
-                  <th>类型</th>
-                  <th className="num">金额</th>
-                  <th>状态</th>
-                  <th>账期 / 账单号</th>
-                  <th>来源</th>
-                </tr>
-              </thead>
-              <tbody>
-                {charges.map((c) => (
-                  <tr key={c.id}>
-                    <td className="nowrap tiny">{formatDateTime(c.paidAt)}</td>
-                    <td>{c.accountId ? (accountName.get(c.accountId) ?? c.accountId) : <span className="faint">未指定</span>}</td>
-                    <td>{c.kind}</td>
-                    <td className="num">
-                      <strong>{formatMoneyMinor(c.amountMinor, c.currency)}</strong>
-                    </td>
-                    <td>
-                      <Badge tone={c.status === 'paid' ? 'ok' : c.status === 'pending' ? 'warn' : 'neutral'}>{c.status}</Badge>
-                    </td>
-                    <td className="tiny">
-                      {c.periodStart ?? '—'}
-                      {c.billingRef ? <div className="faint mono">{c.billingRef}</div> : null}
-                    </td>
-                    <td>
-                      <SourceLine method={c.collectionMethod} quality={c.measurementQuality} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* 额度快照                                                            */
-/* ------------------------------------------------------------------ */
-
-function QuotaPanel({
-  accounts,
-  buckets,
-  accountName,
-  onChanged,
-  toast,
-}: {
-  accounts: AccountRecord[];
-  buckets: QuotaBucket[];
-  accountName: Map<string, string>;
-  onChanged: () => Promise<void>;
-  toast: PageProps['toast'];
-}): ReactNode {
-  const [form, setForm] = useState({
-    accountId: '',
-    bucketId: '',
-    bucketLabel: '',
-    windowKind: 'hourly',
-    scope: '',
-    remainingPercent: '',
-    usedPercent: '',
-    resetAt: '',
-    sourceRef: '',
-    staleAfterSeconds: '21600',
-  });
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!form.accountId && accounts.length > 0) setForm((f) => ({ ...f, accountId: accounts[0]?.id ?? '' }));
-  }, [accounts, form.accountId]);
-
-  const submit = async (): Promise<void> => {
-    if (!form.accountId) return toast('请先选择账户', 'warn');
-    if (!form.bucketId.trim() || !form.bucketLabel.trim()) return toast('请填写额度桶 ID 与名称', 'warn');
-
-    const used = form.usedPercent.trim() ? Number(form.usedPercent) / 100 : null;
-    const remaining = form.remainingPercent.trim() ? Number(form.remainingPercent) / 100 : null;
-    if (used !== null && (!Number.isFinite(used) || used < 0 || used > 1)) return toast('已用比例需在 0–100 之间', 'warn');
-    if (remaining !== null && (!Number.isFinite(remaining) || remaining < 0 || remaining > 1))
-      return toast('剩余比例需在 0–100 之间', 'warn');
-
-    setBusy(true);
-    try {
-      await api.post('/api/quota-snapshots', {
-        accountId: form.accountId,
-        bucketId: form.bucketId.trim(),
-        bucketLabel: form.bucketLabel.trim(),
-        scope: form.scope.trim() || null,
-        windowKind: form.windowKind,
-        usedRatio: used,
-        remainingRatio: remaining,
-        resetAt: form.resetAt ? new Date(form.resetAt).toISOString() : null,
-        observedAt: new Date().toISOString(),
-        measurementQuality: 'provider_reported',
-        collectionMethod: 'manual',
-        sourceRef: form.sourceRef.trim() || null,
-        staleAfterSeconds: Number(form.staleAfterSeconds) || 21600,
-      });
-      toast('额度快照已登记。', 'ok');
-      setForm({ ...form, bucketId: '', bucketLabel: '', remainingPercent: '', usedPercent: '' });
-      await onChanged();
-    } catch (err) {
-      toast(err instanceof Error ? err.message : String(err), 'danger');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="stack">
-      <Card title="更新额度快照">
-        <div className="grid cols-3">
-          <label className="field">
-            <span>账户</span>
-            <select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })}>
-              <option value="">请选择</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.alias}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>额度桶 ID</span>
-            <input
-              value={form.bucketId}
-              onChange={(e) => setForm({ ...form, bucketId: e.target.value })}
-              placeholder="例如 chatgpt-weekly"
-            />
-          </label>
-          <label className="field">
-            <span>显示名称</span>
-            <input value={form.bucketLabel} onChange={(e) => setForm({ ...form, bucketLabel: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>窗口</span>
-            <select value={form.windowKind} onChange={(e) => setForm({ ...form, windowKind: e.target.value })}>
-              <option value="hourly">小时窗</option>
-              <option value="daily">日窗</option>
-              <option value="weekly">周窗</option>
-              <option value="monthly">月窗</option>
-              <option value="custom">自定义</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>已用 %</span>
-            <input
-              value={form.usedPercent}
-              onChange={(e) => setForm({ ...form, usedPercent: e.target.value })}
-              placeholder="42"
-              inputMode="decimal"
-            />
-          </label>
-          <label className="field">
-            <span>剩余 %</span>
-            <input
-              value={form.remainingPercent}
-              onChange={(e) => setForm({ ...form, remainingPercent: e.target.value })}
-              placeholder="58"
-              inputMode="decimal"
-            />
-          </label>
-          <label className="field">
-            <span>重置时间</span>
-            <input type="datetime-local" value={form.resetAt} onChange={(e) => setForm({ ...form, resetAt: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>共享入口</span>
-            <input
-              value={form.scope}
-              onChange={(e) => setForm({ ...form, scope: e.target.value })}
-              placeholder="ChatGPT App, Codex"
-            />
-          </label>
-          <label className="field">
-            <span>来源说明</span>
-            <input
-              value={form.sourceRef}
-              onChange={(e) => setForm({ ...form, sourceRef: e.target.value })}
-              placeholder="例如「官方设置页截图抄录」"
-            />
-          </label>
-          <label className="field">
-            <span>新鲜度阈值（秒）</span>
-            <input
-              value={form.staleAfterSeconds}
-              onChange={(e) => setForm({ ...form, staleAfterSeconds: e.target.value })}
-              inputMode="numeric"
-            />
-          </label>
-        </div>
-        <div className="modal-foot" style={{ border: 'none', paddingTop: 8 }}>
-          <button className="primary" disabled={busy} onClick={() => void submit()}>
-            保存快照
-          </button>
-        </div>
-      </Card>
-
-      <Card title={`现有额度桶（${buckets.length} 个）`}>
-        {buckets.length === 0 ? (
-          <EmptyState kind="not_configured" title="还没有登记过额度" />
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>账户 / 桶</th>
-                  <th>窗口</th>
-                  <th>状态</th>
-                  <th>比例</th>
-                  <th>重置</th>
-                  <th>上次观测</th>
-                  <th>共享入口</th>
-                </tr>
-              </thead>
-              <tbody>
-                {buckets.map((b) => (
-                  <tr key={b.snapshotId}>
-                    <td>
-                      <div>{accountName.get(b.accountId) ?? b.accountId}</div>
-                      <div className="faint tiny">{b.bucketLabel}</div>
-                    </td>
-                    <td>
-                      <Badge tone="ghost">{b.windowKind}</Badge>
-                    </td>
-                    <td>
-                      <div className="row tight">
-                        <Badge
-                          tone={
-                            b.freshness === 'fresh' ? 'ok' : b.freshness === 'pending_refresh' ? 'warn' : b.freshness === 'stale' ? 'warn' : 'neutral'
-                          }
-                        >
-                          {b.stateLabel}
-                        </Badge>
-                      </div>
-                      {b.inconsistent ? <div className="danger-text tiny">数值自相矛盾</div> : null}
-                    </td>
-                    <td className="tiny">
-                      {b.remainingRatio !== null ? `剩余 ${(b.remainingRatio * 100).toFixed(1)}%` : null}
-                      {b.usedRatio !== null ? <div className="faint">已用 {(b.usedRatio * 100).toFixed(1)}%</div> : null}
-                      {!b.ratioAuthoritative ? <div className="warn-text">不可作为当前值</div> : null}
-                    </td>
-                    <td className="tiny">{formatDateTime(b.resetAt)}</td>
-                    <td className="tiny">
-                      {formatDateTime(b.observedAt)}
-                      <div className="faint">{formatRelative(b.observedAt)}</div>
-                    </td>
-                    <td className="tiny">{b.sharedWith.join('、') || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* 导入                                                                */
-/* ------------------------------------------------------------------ */
-
-/**
- * 导入结果的一句话总结。
- *
- * 这里不能只报「新增 / 重放」两个数：实测证明**重复导入同一个带 request_id 的 CSV
- * 走的是 evidence 而不是 replay**，只报那两个数会得到「新增 0 行，重放 0 行」，
- * 用户会以为导入失败。所以哪个计数非零就说哪个。
- */
 function importSummary(r: ImportOutcome): string {
   const parts: string[] = [`新增 ${r.acceptedRows} 行`];
   if (r.replayedRows > 0) parts.push(`完全一致跳过 ${r.replayedRows} 行`);
@@ -988,7 +523,7 @@ function ImportPanel({
   onImported: () => Promise<void>;
   toast: PageProps['toast'];
 }): ReactNode {
-  const [kind, setKind] = useState<'usage_csv' | 'usage_json' | 'charge_csv'>('usage_csv');
+  const [kind, setKind] = useState<'usage_csv' | 'usage_json'>('usage_csv');
   const [fileName, setFileName] = useState('usage.csv');
   const [content, setContent] = useState('');
   const [accountId, setAccountId] = useState('');
@@ -1042,12 +577,11 @@ function ImportPanel({
               onChange={(e) => {
                 const next = e.target.value as typeof kind;
                 setKind(next);
-                setFileName(next === 'usage_json' ? 'usage.json' : next === 'charge_csv' ? 'charges.csv' : 'usage.csv');
+                setFileName(next === 'usage_json' ? 'usage.json' : 'usage.csv');
               }}
             >
               <option value="usage_csv">用量 CSV</option>
               <option value="usage_json">用量 JSON</option>
-              <option value="charge_csv">收费 CSV</option>
             </select>
           </label>
           <label className="field">
@@ -1140,9 +674,7 @@ function ImportPanel({
               placeholder={
                 kind === 'usage_json'
                   ? '[{"occurred_at":"2026-09-01T00:00:00Z","input_tokens":1000,"output_tokens":200,"cached_tokens":600}]'
-                  : kind === 'charge_csv'
-                    ? 'occurred_at,amount,currency,kind,status,billing_ref,period_start\n2026-09-01,19.99,CNY,subscription,paid,inv-001,2026-09-01'
-                    : 'occurred_at,model,input_tokens,output_tokens,cached_tokens,reasoning_tokens,request_id\n2026-09-01T00:00:00Z,model-a,10000,2000,6000,1000,req-1'
+                  : 'occurred_at,model,input_tokens,output_tokens,cached_tokens,reasoning_tokens,request_id\n2026-09-01T00:00:00Z,model-a,10000,2000,6000,1000,req-1'
               }
               spellCheck={false}
             />
@@ -1244,20 +776,4 @@ function ImportPanel({
       ) : null}
     </div>
   );
-}
-
-/** 主单位小数字面量 → 最小单位整数字符串。拒绝浮点输入。 */
-function parseDecimalToMinor(decimal: string, currency: string): string {
-  if (!/^-?\d+(\.\d+)?$/.test(decimal)) {
-    throw new Error(`金额 ${JSON.stringify(decimal)} 不是合法的十进制数`);
-  }
-  const digits = ['JPY', 'KRW', 'VND'].includes(currency.toUpperCase()) ? 0 : 2;
-  const negative = decimal.startsWith('-');
-  const unsigned = negative ? decimal.slice(1) : decimal;
-  const [intPart = '0', fracRaw = ''] = unsigned.split('.');
-  if (fracRaw.length > digits) {
-    throw new Error(`${currency} 最多 ${digits} 位小数`);
-  }
-  const minor = BigInt(`${intPart}${fracRaw.padEnd(digits, '0')}`);
-  return (negative ? -minor : minor).toString();
 }
