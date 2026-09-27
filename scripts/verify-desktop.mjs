@@ -82,6 +82,7 @@ try {
   await command('Runtime.enable');
   await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1080, deviceScaleFactor: 1, mobile: false });
   async function capture(name) {
+    await evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))).then(() => true)`);
     const shot = await command('Page.captureScreenshot', { format: 'png' });
     writeFileSync(join(output, name), Buffer.from(shot.data, 'base64'));
   }
@@ -93,6 +94,8 @@ try {
   assert.equal(await evaluate(`/用量明细|数据设置|更多工具|收费流水/.test(document.body.innerText)`), false);
   assert.equal(await evaluate(`document.querySelectorAll('.kpi').length`), 4);
   assert.equal(await evaluate(`fetch('/api/history/total').then(r => r.json()).then(r => r.totalTokens)`), null, 'Fresh test profile must contain no usage');
+  assert.equal(await evaluate(`!!document.querySelector('.control-deck, select[aria-label="统计来源"]')`),false);
+  assert.equal(await evaluate(`!!document.querySelector('.observatory-nav .nav-sync-button')`),true);
   await capture('aqua-empty.png');
   // A real isolated database is populated via public APIs; these are QA fixtures, never user data.
   async function post(path, body) {
@@ -108,13 +111,13 @@ try {
       const input = Math.floor((100000+day*2400+Math.sin(day*.7+index)*60000)/(index+1));
       const output = Math.floor(input*.23);
       expectedTotal += input+output;
-      const model = [['gpt-5.4','gpt-5.4-mini'],['deepseek-v3','deepseek-r1'],['claude-sonnet','claude-opus']][index][day%2];
+      const model = [['gpt-5.4','gpt-5.4-mini','gpt-5.4-pro'],['deepseek-v3','deepseek-r1','deepseek-v4'],['claude-sonnet','claude-opus','claude-haiku']][index][day%3];
       rows.push([date,provider+'-qa-'+day,model,input,output,Math.floor(input*.68),Math.floor(output*.26)].join(','));
     }
     const result = await post('/api/imports', { kind:'usage_csv',fileName:provider+'-qa.csv',accountId:account.account.id,content:rows.join('\n') });
     assert.equal(result.acceptedRows,81);
   }
-  await evaluate(`document.querySelector('[aria-label="刷新统计"]').click()`);
+  await evaluate('location.reload()');
   try {
     await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.getAttribute('title') === ${JSON.stringify(expectedTotal.toLocaleString('zh-CN'))}`), 15000);
   } catch (error) {
@@ -123,8 +126,11 @@ try {
     throw error;
   }
   assert.equal(await evaluate(`document.querySelectorAll('.donut-legend button').length`),3);
-  assert.equal(await evaluate(`document.querySelectorAll('.model-rank').length`),6);
+  assert.equal(await evaluate(`document.querySelectorAll('.model-rank').length`),9);
   assert.match(await evaluate(`document.querySelector('.trend-meta strong').textContent`), /^[\d,]+$/);
+  assert.equal(await evaluate(`!!document.querySelector('.head-instrument')`),false);
+  assert.equal(await evaluate(`[...document.querySelectorAll('.trend-chart path[fill="none"]')].some(p => p.getAttribute('d').includes('C'))`),true);
+  assert.equal(await evaluate(`(() => { const b = document.querySelector('.brand-prism').getBoundingClientRect(), s = document.querySelector('.brand-prism svg').getBoundingClientRect(); return Math.abs(b.x+b.width/2-s.x-s.width/2)<1 && Math.abs(b.y+b.height/2-s.y-s.height/2)<1; })()`),true);
   await capture('aqua-dashboard.png');
   for (const label of ['7 天','90 天','全部','30 天']) await clickLabel(label);
   await clickLabel('柱状');
@@ -132,16 +138,16 @@ try {
   await capture('aqua-bars.png');
   await clickLabel('曲线');
   await clickLabel('表格');
-  assert.equal(await evaluate(`document.querySelectorAll('.model-panel tbody tr').length`),6);
+  assert.equal(await evaluate(`document.querySelectorAll('.model-panel tbody tr').length`),9);
   await clickLabel('排行');
   assert.equal(await evaluate(`document.querySelector('.hero-kpi .kpi-value').textContent`),expectedTotal.toLocaleString('zh-CN'));
   await evaluate(`document.querySelector('.donut-legend button').click()`);
   await delay(100);
-  assert.notEqual(await evaluate(`document.querySelector('select[aria-label="统计来源"]').value`),'all');
-  assert.equal(await evaluate(`document.querySelectorAll('.model-rank').length`),2);
+  assert.equal(await evaluate(`document.querySelectorAll('.donut-legend button.selected').length`),1);
+  assert.equal(await evaluate(`document.querySelectorAll('.model-rank').length`),3);
   await evaluate(`document.querySelector('.donut-legend button.selected').click()`);
   await delay(100);
-  assert.equal(await evaluate(`document.querySelector('select[aria-label="统计来源"]').value`),'all');
+  assert.equal(await evaluate(`document.querySelectorAll('.donut-legend button.selected').length`),0);
   await evaluate(`document.querySelector('[aria-label="切换界面动效"]').click()`);
   await delay(100);
   assert.equal(await evaluate(`document.querySelector('.aqua-app').dataset.motion`),'off');
@@ -172,7 +178,7 @@ try {
   await clickLabel('示例数据');
   await waitFor(() => evaluate(`document.querySelector('.telemetry')?.getAttribute('aria-busy') === 'false'`));
   assert.equal(await evaluate(`document.body.innerText.includes('合成数据不计入真实统计')`),true);
-  assert.equal(await evaluate(`document.querySelector('.deck-actions .sync-button').disabled`),true);
+  assert.equal(await evaluate(`document.querySelector('.nav-sync-button').disabled`),true);
   assert.notEqual(await evaluate(`document.querySelector('.hero-kpi .kpi-value').getAttribute('title')`),expectedTotal.toLocaleString('zh-CN'));
   await clickLabel('真实数据');
   await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.getAttribute('title') === ${JSON.stringify(expectedTotal.toLocaleString('zh-CN'))}`));
@@ -190,6 +196,7 @@ try {
   await clickLabel('读取并统计');
   await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.getAttribute('title') === ${JSON.stringify((expectedTotal-deepseekImport+38).toLocaleString('zh-CN'))}`));
   assert.equal(await evaluate(`fetch('/api/history/total').then(r => r.json()).then(r => r.sources.find(s => s.id === 'imported:DeepSeek').included)`), false);
+  assert.equal(await evaluate(`document.body.innerText.includes('同步完成，已重新读取可用统计。')`),false);
   console.log('PASS: DeepSeek UI collection refreshes the dashboard and excludes overlapping generic imports.');
   console.log('PASS: aqua single-screen UI, real API fixture totals, trend ranges and chart switching, model views, source filtering, full numbers, reduced motion, DeepSeek collection, source coverage, 1000px/390px layouts, demo isolation, zero renderer errors.');
   await evaluate('window.close()');

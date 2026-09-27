@@ -1,6 +1,6 @@
 # Windows 桌面端
 
-Windows x64 便携版位于 `release/AI-Control-Center-0.2.0-x64.exe`，双击即可运行，不需要额外安装 Node 或手动启动服务。便携版启动时需要解压，请稍等窗口出现；每次启动使用独立临时目录，避免干扰已运行的实例。经常使用时可直接运行 `release/win-unpacked/AI Control Center.exe`，省去重复解压，分享此目录时必须保留全部文件。
+Windows x64 便携版位于 `release/current/AI-Control-Center-0.2.0-x64.exe`，双击即可运行，不需要额外安装 Node 或手动启动服务。便携版启动时需要解压，请稍等窗口出现；每次启动使用独立临时目录，避免干扰已运行的实例。经常使用时可直接运行 `release/current/win-unpacked/AI Control Center.exe`，省去重复解压，分享此目录时必须保留全部文件。
 
 桌面版复用现有的用量总览、导入、额度、记忆、备份和 MCP 功能。主进程启动随包携带的 Node 服务，通过私有 IPC 获取一次性配对码，完成原有 HTTP 配对，再把 HttpOnly 会话 Cookie 写入隔离的桌面浏览器。页面不能访问 Node，窗口启用 sandbox 和 contextIsolation，拒绝外部跳转、弹窗和设备权限。
 
@@ -21,7 +21,7 @@ npm run desktop             # 构建并启动桌面端
 npm run desktop:pack        # Windows x64：构建、准备内置 Node 与依赖、生成便携 EXE
 ```
 
-打包需要 Windows x64、Node >= 22.5 和联网下载依赖。准备脚本只复制生产依赖、构建产物及 Node 许可证，不包含数据库、用户配置、源码或测试数据。构建产物在 `release/`，暂存目录为 `.desktop-runtime/`，二者均不提交 Git。包未做商业代码签名，Windows 可能显示未知发布者提示。
+打包需要 Windows x64、Node >= 22.5 和联网下载依赖。准备脚本只复制生产依赖、构建产物及 Node 许可证，不包含数据库、用户配置、源码或测试数据。构建产物统一保存在 `release/current/`，暂存目录为 `.desktop-runtime/`，二者均不提交 Git。包未做商业代码签名，Windows 可能显示未知发布者提示。
 
 若 npm 禁止了 Electron 安装脚本，可显式执行 `node node_modules/electron/install.js`。下载失败时可设置 `ELECTRON_MIRROR`；安装器仍检查 Electron 包附带的校验和。
 
@@ -33,7 +33,7 @@ npm run typecheck
 npm test
 npm run test:desktop
 npm run verify:desktop
-node scripts/verify-desktop.mjs "release/win-unpacked/AI Control Center.exe"
+node scripts/verify-desktop.mjs "release/current/win-unpacked/AI Control Center.exe"
 ```
 
 后端测试覆盖真实 SQLite、匿名拒绝、一次性配对、来源限制、设置持久化、正常关闭和父进程断开。窗口验证使用临时独立数据目录，检查自动登录、页面导航、重复启动、页面无 Node 权限、匿名请求无法共享会话及关窗后端口释放，截图写入 `tmp/desktop-verification/desktop.png`。远程调试参数仅由验证脚本传入，常规启动不启用。分发前还需将 `win-unpacked` 整个目录复制到项目外，再对该目录中的 EXE 执行验证，防止缺失依赖被仓库的 `node_modules` 掩盖。

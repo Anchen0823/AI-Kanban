@@ -18,7 +18,7 @@ OpenCode 支持读取本机数据库同步历史 Token，详见 [OpenCode 历史
   以及客户端 / 账户 / 订阅的登记界面。
   **尚未交付**：在真实 Codex / Cursor / WorkBuddy 客户端里的联调。详见 §6.1。
 
-设计原文见 [`AI-Control-Center-Design-v0.1.md`](./AI-Control-Center-Design-v0.1.md)，
+设计原文见 [`AI-Control-Center-Design-v0.1.md`](./docs/AI-Control-Center-Design-v0.1.md)，
 实施设计见 [`docs/00-m0-scope.md`](./docs/00-m0-scope.md) 与 [`docs/03-m1-scope.md`](./docs/03-m1-scope.md)。
 
 ---
@@ -27,7 +27,7 @@ OpenCode 支持读取本机数据库同步历史 Token，详见 [OpenCode 历史
 
 ### Windows 桌面版
 
-双击 `release/AI-Control-Center-0.2.0-x64.exe` 即可使用，内置运行时、自动配对，关窗后自动停止服务。从源码运行：`npm run desktop`；生成便携版：`npm run desktop:pack`。数据默认保存在 `%APPDATA%/AI Control Center/data`，现有网页数据的接入方式和验证命令见 [桌面版说明](./docs/07-desktop.md)。
+双击 `release/current/AI-Control-Center-0.2.0-x64.exe` 即可使用，内置运行时、自动配对，关窗后自动停止服务。从源码运行：`npm run desktop`；生成便携版：`npm run desktop:pack`。数据默认保存在 `%APPDATA%/AI Control Center/data`，现有网页数据的接入方式和验证命令见 [桌面版说明](./docs/07-desktop.md)。
 
 ### 网页版
 
@@ -178,8 +178,8 @@ AICC_PORT=8788 npm start        # PowerShell: $env:AICC_PORT=8788; npm start
 ## 目录结构
 
 ```
-├─ AI-Control-Center-Design-v0.1.md   原始设计稿
 ├─ docs/
+│  ├─ AI-Control-Center-Design-v0.1.md 原始设计稿
 │  ├─ 00-m0-scope.md                  目录结构 / 数据实体 / 状态迁移 / M0 未实现清单
 │  ├─ 01-invariants.md                关键不变量（可执行断言的来源）
 │  ├─ 02-test-plan.md                 M0 验收测试计划与实测结果
@@ -241,3 +241,5 @@ AICC_PORT=8788 npm start        # PowerShell: $env:AICC_PORT=8788; npm start
 ### MiniMax Code 本机历史
 
 首页点击「同步 MiniMax Code」读取本机保留的会话用量，支持模型和日期分布、重复同步去重。与 API 导入或其他客户端存在潜在重叠时，MiniMax Code 单独展示、不重复纳入总计。详见 [MiniMax Code 接入说明](./docs/10-minimax-history.md)。
+
+发布产物统一在 `release/current/`；调试日志与临时验证文件归入 `tmp/`。真实数据位于 `data/` 或桌面用户数据目录，不参与发布清理。

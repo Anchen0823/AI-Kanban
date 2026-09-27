@@ -1,6 +1,6 @@
 module.exports = {
   appId: 'io.aicc.desktop', productName: 'AI Control Center',
-  directories: { app: 'apps/desktop', output: 'release' },
+  directories: { app: 'apps/desktop', output: 'release/current' },
   files: ['main.cjs', 'package.json', 'assets/*'],
   extraResources: [{ from: '.desktop-runtime', to: 'runtime' }],
   // electron-builder's dependency collector excludes nested node_modules from

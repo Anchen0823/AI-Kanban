@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { smoothPath } from '../chart-path.js';
 import { AdaptiveNumber } from '../AdaptiveNumber.js';
 import { api, getWorkspace } from '../api.js';
 import { aggregate, buildSources, calendarDays, formatNumber as number, LOCAL_SOURCES, sumKnown, type ImportedHistory, type LocalHistory, type SourceData, type TotalHistory } from '../analytics.js';
@@ -20,6 +22,8 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
   const [updated, setUpdated] = useState<string | null>(null);
   const syncLock = useRef(false);
   const demo = getWorkspace() === 'demo';
+  const [navTarget, setNavTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => setNavTarget(document.getElementById('nav-sync')), []);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -44,7 +48,7 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
   }, [refreshToken, demo]);
   const sync = useCallback(async (id: string) => {
     if (syncLock.current || demo) return;
-    syncLock.current = true; setBusy(id); setErrors([]);
+    syncLock.current = true; setBusy(id); setErrors([]); setSyncMessage('');
     const issues: string[] = [];
     try {
       for (const target of id === 'all' ? ['codex', 'workbuddy', 'opencode', 'minimax'] : [id]) {
@@ -55,7 +59,7 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
         } catch (error) { issues.push(`${target}: ${error instanceof Error ? error.message : String(error)}`); }
       }
       if (issues.length) setSyncMessage(issues.join(' / '));
-      else setSyncMessage('同步完成，已重新读取可用统计。');
+      else setSyncMessage('');
       reload();
     } finally { syncLock.current = false; setBusy(null); }
   }, [demo, directory, reload]);
@@ -71,10 +75,10 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
   const fmt = (v: number | null | undefined) => <AdaptiveNumber value={v} />;
   const included = sources.filter(s => s.included && s.total != null);
   return <div className="telemetry" aria-busy={loading}>
-    <div className="telemetry-heading"><div><h1>用量统计<span className="heading-dot">.</span></h1></div><div className="head-instrument" aria-hidden="true"><div className="orb"><i /><i /><i /><b>AI</b></div></div></div>
-    <div className="control-deck glass"><div className="scope-controls"><select aria-label="统计来源" value={selected} onChange={e => setSelected(e.target.value)}><option value="all">全部来源</option>{sources.map(s => <option key={s.id} value={s.id}>{s.label}{s.included ? '' : ' · 单独查看'}</option>)}</select></div><div className="deck-actions"><button className="sync-button" disabled={!!busy || demo} onClick={() => void sync('all')}><span className={busy ? 'spin' : ''}>↻</span>{busy ? '正在同步…' : '同步本机用量'}</button></div></div>
+    <div className="telemetry-heading"><div><h1>用量统计<span className="heading-dot">.</span></h1></div></div>
+    {navTarget && createPortal(<button className="nav-sync-button" aria-label="同步本机用量" title={busy ? '正在同步…' : '同步并刷新本机用量'} disabled={!!busy || demo} onClick={() => void sync('all')}><span className={busy ? 'spin' : ''}>↻</span></button>, navTarget)}
     {!!errors.length && <div className="telemetry-notice error" role="alert">部分数据读取失败，现有数据可能不是最新。{errors.join(' / ')}<button onClick={reload}>重试</button></div>}
-    {!!syncMessage && <div className="telemetry-notice" role="status">{syncMessage}<button aria-label="关闭同步提示" onClick={() => setSyncMessage('')}>×</button></div>}
+    {!!syncMessage && <div className="telemetry-notice error" role="alert">{syncMessage}<button aria-label="关闭同步提示" onClick={() => setSyncMessage('')}>×</button></div>}
     <section className="kpi-grid" aria-label="核心用量指标">
       <Kpi title="累计 Token" value={fmt(activeTotal)} exact={number(activeTotal)} note={total?.partial ? '已知用量合计' : '历史累计'} hero><MiniSpark days={data.days} /></Kpi>
       <Kpi title="输入 Token" value={fmt(data.input)} exact={number(data.input)}><span className="kpi-glyph">↗</span></Kpi>
@@ -91,8 +95,7 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
     </div>
     <div className="detail-grid" id="models">
       <section className="data-panel model-panel"><PanelHead title="模型排行" accessory={<div className="segmented"><button aria-pressed={modelView === 'bars'} onClick={() => setModelView('bars')}>排行</button><button aria-pressed={modelView === 'table'} onClick={() => setModelView('table')}>表格</button></div>} />
-        {data.models.length ? modelView === 'bars' ? <div className="model-ranks">{data.models.slice(0,8).map((model,i) => <div className="model-rank" key={model.name}><span className="rank-index">{String(i + 1).padStart(2,'0')}</span><div><div className="rank-label"><span title={model.name}>{model.name}</span><strong title={number(model.value)}>{fmt(model.value)}</strong></div><div className="rank-track"><i style={{ width: `${data.models[0]?.value ? Math.max(0,(model.value ?? 0) / data.models[0].value * 100) : 0}%`, background: COLORS[i % COLORS.length] }} /></div></div></div>)}</div> : <div className="analytics-table"><table><thead><tr><th>模型</th><th className="num">累计 Token</th></tr></thead><tbody>{data.models.map(model => <tr key={model.name}><td>{model.name}</td><td className="num">{number(model.value)}</td></tr>)}</tbody></table></div> : <ChartEmpty text="暂无模型数据" />}
-        {modelView === 'bars' && data.models.length > 0 && <p className="panel-note">前 8 名</p>}
+        {data.models.length ? modelView === 'bars' ? <div className="model-ranks">{data.models.map((model,i) => <div className="model-rank" key={model.name}><span className="rank-index">{String(i + 1).padStart(2,'0')}</span><div><div className="rank-label"><span title={model.name}>{model.name}</span><strong title={number(model.value)}>{fmt(model.value)}</strong></div><div className="rank-track"><i style={{ width: `${data.models[0]?.value ? Math.max(0,(model.value ?? 0) / data.models[0].value * 100) : 0}%`, background: COLORS[i % COLORS.length] }} /></div></div></div>)}</div> : <div className="analytics-table"><table><thead><tr><th>模型</th><th className="num">累计 Token</th></tr></thead><tbody>{data.models.map(model => <tr key={model.name}><td>{model.name}</td><td className="num">{number(model.value)}</td></tr>)}</tbody></table></div> : <ChartEmpty text="暂无模型数据" />}
       </section>
       <section className="data-panel composition-panel"><PanelHead title="Token 构成" /><div className="composition-total"><span>输入 + 输出</span><strong>{fmt(sumKnown([data.input, data.output]))}</strong></div><div className="composition-track" aria-label="输入与输出比例">{[['输入',data.input],['输出',data.output]].map(([name,value],i) => <span key={name} title={`${name} ${number(value as number | null)}`} style={{ width: `${(sumKnown([data.input,data.output]) ?? 0) > 0 ? Number(value ?? 0) / sumKnown([data.input,data.output])! * 100 : 0}%`, background: COLORS[i] }} />)}</div><div className="composition-rows">{[['输入',data.input],['输出',data.output],['缓存输入',data.cached],['推理输出',data.reasoning]].map(([name,value],i) => <div key={name}><span><i style={{background:COLORS[i % 2]}} />{name}</span><strong title={number(value as number | null)}>{fmt(value as number | null)}</strong></div>)}</div><p className="panel-note">缓存、推理为子项</p></section>
       <section className="data-panel heat-panel"><PanelHead title="活动热力图" accessory={<span className="subtle-chip">13 周</span>} /><Heatmap days={heatDays} /><div className="heat-insight"><strong>{heatDays.some(d => d.value != null) ? heatDays.filter(d => d.value != null && d.value > 0).length : '—'}</strong><span>活跃天数<br /><small>{endDay ? `截至 ${endDay}` : '尚未同步'}</small></span></div></section>
@@ -112,7 +115,7 @@ function PanelHead({ title, accessory }: {title: string; accessory?: ReactNode})
 function ChartEmpty({text}: {text:string}) { return <div className="chart-empty"><span aria-hidden="true">⌁</span><strong>{text}</strong></div>; }
 function MiniSpark({days}: {days:Point[]}) {
   const points = days.filter(d => d.value != null).slice(-20); const max = Math.max(1,...points.map(p => p.value!));
-  return <svg viewBox="0 0 130 40"><path d={points.length > 1 ? points.map((p,i) => `${i ? 'L' : 'M'} ${i / (points.length-1)*130} ${37-p.value!/max*32}`).join(' ') : 'M0 32H130'} fill="none" stroke="currentColor" strokeWidth="2" /></svg>;
+  return <svg viewBox="0 0 130 40"><path d={points.length > 1 ? smoothPath(points.map((p,i) => ({x:i / (points.length-1)*130,y:37-p.value!/max*32}))) : 'M0 32H130'} fill="none" stroke="currentColor" strokeWidth="2" /></svg>;
 }
 function TrendChart({ days, mode }: { days: Point[]; mode: 'area' | 'bar' }) {
   const [hover,setHover] = useState<number | null>(null);
@@ -127,7 +130,7 @@ function TrendChart({ days, mode }: { days: Point[]; mode: 'area' | 'bar' }) {
   return <div className="trend-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`每日 Token ${mode === 'area' ? '曲线图' : '柱状图'}`} onMouseLeave={() => setHover(null)}>
     <defs><linearGradient id="aqua-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3abdc7" stopOpacity=".27"/><stop offset="100%" stopColor="#3abdc7" stopOpacity=".015"/></linearGradient></defs>
     {[0,.25,.5,.75,1].map(f => <g key={f}><line x1={left} x2={right} y1={y(max*f)} y2={y(max*f)} stroke="#e5edef" strokeDasharray="3 5"/><text x={left-10} y={y(max*f)+4} textAnchor="end">{number(max*f,true)}</text></g>)}
-    {mode === 'area' ? groups.map((g,i) => { const d=g.map(({p,i},index) => `${index?'L':'M'}${x(i)},${y(p.value!)}`).join(' '); return <g key={i}><path d={`${d} L${x(g.at(-1)!.i)},${bottom} L${x(g[0]!.i)},${bottom} Z`} fill="url(#aqua-area)"/><path d={d} fill="none" stroke="#16a9b5" strokeWidth="2.5" strokeLinejoin="round"/>{g.length===1 && <circle cx={x(g[0]!.i)} cy={y(g[0]!.p.value!)} r="3" fill="#16a9b5"/>}</g>; }) : days.map((p,i) => p.value == null ? null : <rect key={p.day} x={x(i)-Math.max(1,(right-left)/days.length*.62)/2} y={y(p.value)} width={Math.max(1,(right-left)/days.length*.62)} height={Math.max(1,bottom-y(p.value))} rx="2" fill="#38b6c2"/>)}
+    {mode === 'area' ? groups.map((g,i) => { const d=smoothPath(g.map(({p,i}) => ({x:x(i),y:y(p.value!)}))); return <g key={i}><path d={`${d} L${x(g.at(-1)!.i)},${bottom} L${x(g[0]!.i)},${bottom} Z`} fill="url(#aqua-area)"/><path d={d} fill="none" stroke="#16a9b5" strokeWidth="2.5" strokeLinejoin="round"/>{g.length===1 && <circle cx={x(g[0]!.i)} cy={y(g[0]!.p.value!)} r="3" fill="#16a9b5"/>}</g>; }) : days.map((p,i) => p.value == null ? null : <rect key={p.day} x={x(i)-Math.max(1,(right-left)/days.length*.62)/2} y={y(p.value)} width={Math.max(1,(right-left)/days.length*.62)} height={Math.max(1,bottom-y(p.value))} rx="2" fill="#38b6c2"/>)}
     {days.map((p,i) => <rect key={p.day} x={left+i/days.length*(right-left)} y={top} width={(right-left)/days.length} height={bottom-top} fill="transparent" onMouseEnter={() => setHover(i)}><title>{p.day}: {p.value == null ? '没有记录' : `${number(p.value)} Token`}</title></rect>)}
     {hover != null && current && <g pointerEvents="none"><line x1={x(hover)} x2={x(hover)} y1={top} y2={bottom} stroke="#499ea8" strokeDasharray="3 4"/>{current.value != null && <circle cx={x(hover)} cy={y(current.value)} r="4" fill="#fff" stroke="#16a9b5" strokeWidth="2"/>}</g>}
     {[...new Set([0,Math.floor((days.length-1)/2),days.length-1])].filter(i=>i>=0 && days[i]).map(i => <text key={i} x={x(i)} y="182" textAnchor="middle">{days[i]!.day.slice(5)}</text>)}
