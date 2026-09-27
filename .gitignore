@@ -6,6 +6,7 @@ node_modules/
 # --- 构建产物 ---
 dist/
 release/
+release-*/
 .desktop-runtime/
 build/
 *.tsbuildinfo
