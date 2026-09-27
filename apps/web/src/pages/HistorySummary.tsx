@@ -67,6 +67,8 @@ export function HistorySummary({ navigate, refreshToken }: Pick<PageProps, 'navi
     </section>
     <DeepseekHistory refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
     <WorkbuddyHistory refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
+    <WorkbuddyHistory source="opencode" refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
+    <WorkbuddyHistory source="doubao" refreshToken={refreshToken} onSynced={() => setTotalRevision(value => value + 1)} />
     </div>
     {!!(imported?.count || importError) && <section className="history-imported" aria-label="其他导入记录">
       <div className="history-source-title"><h3>其他导入记录</h3><button onClick={() => navigate('usage')}>查看记录 →</button></div>

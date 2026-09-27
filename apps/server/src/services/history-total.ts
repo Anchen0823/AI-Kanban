@@ -5,6 +5,7 @@ import type { ServiceContext } from '../service-context.js';
 import { getCodexHistory } from './codex-history.js';
 import { getDeepseekHistory } from './deepseek-history.js';
 import { getWorkbuddyHistory } from './workbuddy-history.js';
+import { clientLabels, getLocalClientHistory } from './local-client-history.js';
 import { importedHistory } from './history-imported.js';
 
 export interface HistoryTotalSource {
@@ -123,7 +124,16 @@ export function historyTotal(
   let codexKnown = false;
   let deepseekKnown = false;
   let workbuddyKnown = false;
+  let opencodeKnown = false;
   if (workspace === 'real') {
+    for (const id of ['opencode', 'doubao'] as const) {
+      const history = getLocalClientHistory(ctx, id);
+      const known = history.status === 'ok' && history.totals.totalTokens !== null;
+      if (id === 'opencode') opencodeKnown = known;
+      candidates.push({ id, label: `${clientLabels[id]}本机历史`, totalTokens: history.totals.totalTokens,
+        included: known, reason: known ? null : id === 'doubao' ? '本地任务未提供 Token，用量未知' : '尚无可用的 OpenCode 历史总量',
+        partial: true, warnings: history.warnings });
+    }
     const codex = getCodexHistory(ctx);
     const workbuddy = getWorkbuddyHistory(ctx);
     workbuddyKnown = workbuddy.status === 'ok' && workbuddy.totals.totalTokens !== null;
@@ -158,7 +168,9 @@ export function historyTotal(
 
   for (const provider of imported.providers) {
     let reason: string | null = null;
-    if (workbuddyKnown && /^(?:workbuddy|codebuddy)(?:$|[\s_-])/i.test(provider.provider.trim())) {
+    if (opencodeKnown && /^opencode(?:$|[\s_-])/i.test(provider.provider.trim())) {
+      reason = '已有 OpenCode 专用历史，通用导入可能重叠';
+    } else if (workbuddyKnown && /^(?:workbuddy|codebuddy)(?:$|[\s_-])/i.test(provider.provider.trim())) {
       reason = '已有 WorkBuddy 专用历史，通用导入可能重叠';
     } else if (provider.provider === 'DeepSeek' && deepseekKnown) {
       reason = '已有 DeepSeek 官方导出，通用导入可能重叠';

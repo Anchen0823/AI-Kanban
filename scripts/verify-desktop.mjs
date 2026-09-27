@@ -96,6 +96,27 @@ try {
     console.log(JSON.stringify({ workbuddy: { totals: first.totals, sessionCount: first.sessionCount, modelCount: first.byModel.length, firstAt: first.firstAt, lastAt: first.lastAt, warnings: first.warnings } }));
     await evaluate(`document.querySelector('[aria-label="WorkBuddy 历史用量"]').scrollIntoView({block:'center'})`);
   }
+  if (process.env.AICC_VERIFY_LOCAL_CLIENTS === '1') {
+    for (const [id, label, action] of [['opencode', 'OpenCode', '同步'], ['doubao', '豆包工作', '检测']]) {
+      const selector = `[aria-label="${label} 历史用量"]`;
+      assert.equal(await evaluate(`(() => { const b = document.querySelector(${JSON.stringify(selector)}+' button'); if (!b || b.disabled || !b.textContent.includes(${JSON.stringify(action)})) return false; b.click(); return true; })()`), true);
+      await waitFor(() => evaluate(`!document.querySelector(${JSON.stringify(selector)}+' button').disabled`));
+      await waitFor(() => evaluate(`fetch('/api/history/${id}').then(r=>r.json()).then(r=>r.checkedAt !== null)`));
+      const first = await evaluate(`fetch('/api/history/${id}').then(r=>r.json())`);
+      if (id === 'opencode') { assert.equal(first.status, 'ok'); assert.ok(first.totals.totalTokens > 0); }
+      else { assert.equal(first.status, 'empty'); assert.equal(first.totals.totalTokens, null); assert.ok(first.sessionCount > 0); }
+      await evaluate(`document.querySelector(${JSON.stringify(selector)}+' button').click()`);
+      await waitFor(() => evaluate(`!document.querySelector(${JSON.stringify(selector)}+' button').disabled`));
+      const second = await evaluate(`fetch('/api/history/${id}').then(r=>r.json())`);
+      assert.deepEqual(second.totals, first.totals);
+      const total = await evaluate(`fetch('/api/history/total').then(r=>r.json())`);
+      assert.equal(total.sources.find(source => source.id === id).included, id === 'opencode');
+      console.log(JSON.stringify({ client: id, totalTokens: first.totals.totalTokens, sessionCount: first.sessionCount }));
+      await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'})`);
+      const shot = await command('Page.captureScreenshot', { format: 'png' });
+      writeFileSync(join(output, `${id}.png`), Buffer.from(shot.data, 'base64'));
+    }
+  }
   const screenshot = await command('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(output, 'desktop.png'), Buffer.from(screenshot.data, 'base64'));
   const text = await evaluate('document.body.innerText');

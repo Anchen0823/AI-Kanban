@@ -10,7 +10,9 @@ interface History {
   warnings: string[]; message: string;
 }
 const number = (x: number | null | undefined): string => x == null ? '—' : x.toLocaleString('zh-CN');
-export function WorkbuddyHistory({ refreshToken, onSynced }: { refreshToken: number; onSynced: () => void }): ReactNode {
+export function WorkbuddyHistory({ refreshToken, onSynced, source = 'workbuddy' }: { refreshToken: number; onSynced: () => void; source?: 'workbuddy' | 'opencode' | 'doubao' }): ReactNode {
+  const label = { workbuddy: 'WorkBuddy', opencode: 'OpenCode', doubao: '豆包工作' }[source];
+  const endpoint = `/api/history/${source}`;
   const demo = getWorkspace() === 'demo';
   const [history, setHistory] = useState<History | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -18,17 +20,17 @@ export function WorkbuddyHistory({ refreshToken, onSynced }: { refreshToken: num
   useEffect(() => {
     let cancelled = false;
     setHistory(null); setError(null);
-    if (!demo) void api.get<History>('/api/history/workbuddy').then(data => { if (!cancelled) setHistory(data); }).catch((e: Error) => { if (!cancelled) setError(e.message); });
+    if (!demo) void api.get<History>(endpoint).then(data => { if (!cancelled) setHistory(data); }).catch((e: Error) => { if (!cancelled) setError(e.message); });
     return () => { cancelled = true; };
-  }, [demo, refreshToken]);
+  }, [demo, refreshToken, endpoint]);
   async function sync(): Promise<void> {
     setBusy(true); setError(null);
-    try { setHistory(await api.post<History>('/api/history/workbuddy', {})); onSynced(); }
+    try { setHistory(await api.post<History>(endpoint, {})); onSynced(); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   }
-  return <section className="history-primary" aria-label="WorkBuddy 历史用量">
-    <div className="history-source-title"><h3><span className="source-icon" aria-hidden="true">W</span>WorkBuddy</h3><button className="primary" disabled={demo || busy} onClick={() => void sync()}>{busy ? '同步中…' : '同步 WorkBuddy'}</button></div>
+  return <section className="history-primary" aria-label={`${label} 历史用量`}>
+    <div className="history-source-title"><h3><span className="source-icon" aria-hidden="true">{source === 'doubao' ? '豆' : label[0]}</span>{label}</h3><button className="primary" disabled={demo || busy} onClick={() => void sync()}>{busy ? '同步中…' : `${source === 'doubao' ? '检测' : '同步'} ${label}`}</button></div>
     <div className="history-total"><span>累计 Token</span><strong>{number(history?.totals.totalTokens)}</strong></div>
     <div className="history-metrics">
       <div><span>输入</span><strong>{number(history?.totals.inputTokens)}</strong></div>
@@ -36,7 +38,7 @@ export function WorkbuddyHistory({ refreshToken, onSynced }: { refreshToken: num
       <div><span title="已包含在输入中">缓存输入</span><strong>{number(history?.totals.cachedInputTokens)}</strong></div>
       <div><span title="已包含在输出中">推理输出</span><strong>{number(history?.totals.reasoningOutputTokens)}</strong></div>
     </div>
-    <p className="history-coverage">{demo ? '示例工作区不读取本机历史。' : history?.firstAt ? `${history.firstAt.slice(0, 10)} — ${history.lastAt?.slice(0, 10)} · ${number(history.sessionCount)} 个会话` : '点击同步，读取本机保留的 WorkBuddy 用量。'}</p>
+    <p className="history-coverage">{demo ? '示例工作区不读取本机历史。' : history?.firstAt ? `${history.firstAt.slice(0, 10)} — ${history.lastAt?.slice(0, 10)} · ${number(history.sessionCount)} 个会话` : source === 'doubao' ? '本地任务暂未提供 Token 统计。' : `点击同步，读取本机保留的 ${label} 用量。`}</p>
     {error && <div role="alert" className="detector-error">{error}</div>}
     {history && <p className="history-coverage">{history.message}</p>}
     {!!history?.byModel.length && <div className="history-breakdown">
