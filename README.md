@@ -237,3 +237,7 @@ AICC_PORT=8788 npm start        # PowerShell: $env:AICC_PORT=8788; npm start
 | 测试 | Node 内置 `node --test` | 无额外测试框架 |
 
 没有引入 ORM、状态管理库、消息队列、向量数据库或 SSR 框架。
+
+### MiniMax Code 本机历史
+
+首页点击「同步 MiniMax Code」读取本机保留的会话用量，支持模型和日期分布、重复同步去重。与 API 导入或其他客户端存在潜在重叠时，MiniMax Code 单独展示、不重复纳入总计。详见 [MiniMax Code 接入说明](./docs/10-minimax-history.md)。

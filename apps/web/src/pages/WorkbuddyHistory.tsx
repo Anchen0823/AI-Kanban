@@ -10,8 +10,8 @@ interface History {
   warnings: string[]; message: string;
 }
 const number = (x: number | null | undefined): string => x == null ? '—' : x.toLocaleString('zh-CN');
-export function WorkbuddyHistory({ refreshToken, onSynced, source = 'workbuddy' }: { refreshToken: number; onSynced: () => void; source?: 'workbuddy' | 'opencode' }): ReactNode {
-  const label = { workbuddy: 'WorkBuddy', opencode: 'OpenCode' }[source];
+export function WorkbuddyHistory({ refreshToken, onSynced, source = 'workbuddy' }: { refreshToken: number; onSynced: () => void; source?: 'workbuddy' | 'opencode' | 'minimax' }): ReactNode {
+  const label = { workbuddy: 'WorkBuddy', opencode: 'OpenCode', minimax: 'MiniMax Code' }[source];
   const endpoint = `/api/history/${source}`;
   const demo = getWorkspace() === 'demo';
   const [history, setHistory] = useState<History | null>(null);
@@ -41,6 +41,7 @@ export function WorkbuddyHistory({ refreshToken, onSynced, source = 'workbuddy' 
     <p className="history-coverage">{demo ? '示例工作区不读取本机历史。' : history?.firstAt ? `${history.firstAt.slice(0, 10)} — ${history.lastAt?.slice(0, 10)} · ${number(history.sessionCount)} 个会话` : `点击同步，读取本机保留的 ${label} 用量。`}</p>
     {error && <div role="alert" className="detector-error">{error}</div>}
     {history && <p className="history-coverage">{history.message}</p>}
+    {!!history?.warnings.length && <details className="history-coverage"><summary>统计范围与提示</summary>{history.warnings.map(warning => <p key={warning}>{warning}</p>)}</details>}
     {!!history?.byModel.length && <div className="history-breakdown">
       <details><summary>按模型查看</summary><div className="table-wrap"><table><thead><tr><th>模型</th><th>Token</th><th>会话</th></tr></thead><tbody>{[...history.byModel].sort((a, b) => compareModels(a.model, b.model)).map(row => <tr key={row.model}><td>{row.model}</td><td>{number(row.totals.totalTokens)}</td><td>{row.sessionCount}</td></tr>)}</tbody></table></div></details>
       <details><summary>按日期查看</summary><div className="history-days table-wrap"><table><thead><tr><th>日期（UTC）</th><th>Token</th><th>会话</th></tr></thead><tbody>{[...history.byDay].sort((a, b) => compareDates(a.day, b.day)).map(row => <tr key={row.day}><td>{row.day}</td><td>{number(row.totals.totalTokens)}</td><td>{row.sessionCount}</td></tr>)}</tbody></table></div></details>

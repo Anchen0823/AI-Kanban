@@ -8,7 +8,17 @@ import { getCodexHistory, runCodexHistory } from '../../services/codex-history.j
 import { getWorkbuddyHistory, runWorkbuddyHistory } from '../../services/workbuddy-history.js';
 import { getOpencodeHistory, runOpencodeHistory } from '../../services/opencode-history.js';
 
+import { getMinimaxHistory, runMinimaxHistory } from '../../services/minimax-history.js';
+
 export function registerCodexHistoryRoutes(fastify: FastifyInstance, deps: HttpDeps): void {
+  for (const method of ['GET', 'POST'] as const) {
+    fastify.route({ method, url: '/api/history/minimax', handler: async (request, reply) => {
+      requireUser(request, 'MiniMax Code 本机历史');
+      reply.header('Cache-Control', 'no-store');
+      if (workspaceOf(request) !== 'real') throw new ApiError(403, 'forbidden', '本机历史只在真实工作区可查看或扫描。');
+      return method === 'GET' ? getMinimaxHistory(deps.app.ctx) : runMinimaxHistory(deps.app.ctx);
+    } });
+  }
   for (const method of ['GET', 'POST'] as const) {
     fastify.route({ method, url: '/api/history/opencode', handler: async (request, reply) => {
       requireUser(request, 'OpenCode 本机历史');

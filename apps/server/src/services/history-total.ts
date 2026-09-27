@@ -5,6 +5,7 @@ import type { ServiceContext } from '../service-context.js';
 import { getCodexHistory } from './codex-history.js';
 import { getDeepseekHistory } from './deepseek-history.js';
 import { getWorkbuddyHistory } from './workbuddy-history.js';
+import { getMinimaxHistory } from './minimax-history.js';
 import { getOpencodeHistory } from './opencode-history.js';
 import { importedHistory } from './history-imported.js';
 
@@ -151,6 +152,23 @@ export function historyTotal(
       partial: codex.warnings.length > 0 || !codexKnown,
       warnings: codex.warnings,
     });
+
+    const minimax = getMinimaxHistory(ctx);
+    const minimaxKnown = minimax.status === 'ok' && minimax.totals.totalTokens !== null;
+    // No account/request identity is available across these aggregates. Keep the
+    // client card visible, but never add it to a potentially overlapping source.
+    const isMinimax = (value: string): boolean => /^minimax(?:$|[\s_.:/-])/i.test(value.trim());
+    const importOverlap = imported.providers.some(provider => provider.provider === '未分类'
+      || isMinimax(provider.provider) || provider.byModel.some(row => isMinimax(row.model ?? '')));
+    const clientOverlap = [codex, workbuddy, getOpencodeHistory(ctx)].some(history => history.status === 'ok'
+      && history.byModel.some(row => isMinimax(row.model)));
+    const overlapReason = importOverlap ? '已有 MiniMax 或未分类 API 导入，MiniMax Code 可能重叠，仅单独展示'
+      : clientOverlap ? '其他客户端已记录 MiniMax 模型，MiniMax Code 可能重叠，仅单独展示' : null;
+    candidates.push({ id: 'minimax', label: 'MiniMax Code 本机历史', totalTokens: minimax.totals.totalTokens,
+      included: minimaxKnown && overlapReason === null,
+      reason: minimaxKnown ? overlapReason : '尚无可用的 MiniMax Code 历史总量',
+      partial: true, warnings: [...minimax.warnings, ...(minimaxKnown && overlapReason
+        ? ['MiniMax Code 与潜在重叠来源采用来源级排除，不是逐请求精确去重。'] : [])] });
 
     const deepseek = getDeepseekHistory(ctx);
     deepseekKnown = deepseek.status === 'ok' && deepseek.totals.totalTokens !== null;
