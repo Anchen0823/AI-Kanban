@@ -1,15 +1,12 @@
 import { DatabaseSync } from 'node:sqlite';
-import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ServiceContext } from '../service-context.js';
 import { getSetting, setSetting } from '../db/repos/system.js';
 import type { CodexHistoryResponse, CodexHistoryTotals } from './codex-history.js';
 
-export type LocalClient = 'opencode' | 'doubao';
-export const clientLabels = { opencode: 'OpenCode', doubao: '豆包工作' } as const;
 const emptyTotals = (): CodexHistoryTotals => ({ inputTokens: null, outputTokens: null, cachedInputTokens: null, reasoningOutputTokens: null, totalTokens: null });
-const blank = (id: LocalClient): CodexHistoryResponse => ({ status: 'not_scanned', checkedAt: null, totals: emptyTotals(), sessionCount: null, firstAt: null, lastAt: null, byModel: [], byDay: [], warnings: [], message: `尚未同步${clientLabels[id]}本机历史。` });
+const blank = (): CodexHistoryResponse => ({ status: 'not_scanned', checkedAt: null, totals: emptyTotals(), sessionCount: null, firstAt: null, lastAt: null, byModel: [], byDay: [], warnings: [], message: '尚未同步 OpenCode 本机历史。' });
 const numeric = (x: unknown): number | null => typeof x === 'number' && Number.isSafeInteger(x) && x >= 0 ? x : null;
 const sum = (...values: (number | null)[]): number | null => values.every(x => x !== null) ? numeric((values as number[]).reduce((a, b) => a + b, 0)) : null;
 const modelName = (x: unknown): string => typeof x === 'string' && /^[\w.:/-]{1,160}$/.test(x) ? x : '未记录模型';
@@ -23,25 +20,11 @@ export function normalizeOpencodeTokens(row: Record<string, unknown>): CodexHist
   return { inputTokens: input, outputTokens: output, cachedInputTokens: cache, reasoningOutputTokens: reasoning, totalTokens: sum(input, output) ?? numeric(row.total) };
 }
 
-export interface LocalScanOptions { databasePath?: string; doubaoSessionsPath?: string; maxRecords?: number; now?: () => number }
-export async function scanLocalClientHistory(id: LocalClient, options: LocalScanOptions = {}): Promise<CodexHistoryResponse> {
-  const result = blank(id);
+export interface OpencodeScanOptions { databasePath?: string; maxRecords?: number; now?: () => number }
+export async function scanOpencodeHistory(options: OpencodeScanOptions = {}): Promise<CodexHistoryResponse> {
+  const result = blank();
   result.checkedAt = new Date((options.now ?? Date.now)()).toISOString();
   const warn = (text: string): void => { if (!result.warnings.includes(text)) result.warnings.push(text); };
-  if (id === 'doubao') {
-    const dir = options.doubaoSessionsPath ?? process.env.AICC_DOUBAO_SESSIONS ?? join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Doubao', 'User Data', 'Default', '.doubao', 'agent_mode', 'workspace', '.sessions');
-    try {
-      const entries = await readdir(dir, { withFileTypes: true });
-      result.sessionCount = entries.filter(entry => entry.isDirectory() && /^\d+$/.test(entry.name)).length;
-      result.status = 'empty';
-      result.message = result.sessionCount ? `已发现 ${result.sessionCount} 个豆包工作本地任务；当前轨迹格式未提供 Token，用量未知。` : '尚未发现豆包工作本地任务，用量未知。';
-      warn('当前仅支持检测本地任务；Token 统计尚不可用，不计入全部 AI 累计。');
-    } catch (error) {
-      result.status = (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'empty' : 'error';
-      result.message = result.status === 'empty' ? '未找到豆包工作本地任务目录，用量未知。' : '无法读取豆包工作本地任务目录，请检查权限。';
-    }
-    return result;
-  }
   warn('仅覆盖本机 OpenCode 数据库保留的已知用量。');
   const databasePath = options.databasePath ?? process.env.OPENCODE_DB ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'opencode', 'opencode.db');
   let db: DatabaseSync | undefined;
@@ -114,23 +97,22 @@ export async function scanLocalClientHistory(id: LocalClient, options: LocalScan
   return result;
 }
 
-export function getLocalClientHistory(ctx: ServiceContext, id: LocalClient): CodexHistoryResponse {
+export function getOpencodeHistory(ctx: ServiceContext): CodexHistoryResponse {
   try {
-    const value = JSON.parse(getSetting(ctx.db, `history.${id}`) ?? 'null');
+    const value = JSON.parse(getSetting(ctx.db, 'history.opencode') ?? 'null');
     if (value?.schemaVersion === 1 && ['ok', 'empty', 'error'].includes(value.status) && value.totals && Array.isArray(value.byModel) && Array.isArray(value.byDay) && Array.isArray(value.warnings)) {
       const { schemaVersion: _, ...response } = value; return response;
     }
   } catch { /* no valid cache */ }
-  return blank(id);
+  return blank();
 }
-const pending = new WeakMap<ServiceContext, Map<LocalClient, Promise<CodexHistoryResponse>>>();
-export function runLocalClientHistory(ctx: ServiceContext, id: LocalClient, options: LocalScanOptions = {}): Promise<CodexHistoryResponse> {
-  let tasks = pending.get(ctx); if (!tasks) { tasks = new Map(); pending.set(ctx, tasks); }
-  const existing = tasks.get(id); if (existing) return existing;
-  const task = scanLocalClientHistory(id, { ...options, now: () => ctx.now() }).then(result => {
-    setSetting(ctx.db, `history.${id}`, JSON.stringify({ schemaVersion: 1, ...result })); return result;
+const pending = new WeakMap<ServiceContext, Promise<CodexHistoryResponse>>();
+export function runOpencodeHistory(ctx: ServiceContext, options: OpencodeScanOptions = {}): Promise<CodexHistoryResponse> {
+  const existing = pending.get(ctx); if (existing) return existing;
+  const task = scanOpencodeHistory({ ...options, now: () => ctx.now() }).then(result => {
+    setSetting(ctx.db, 'history.opencode', JSON.stringify({ schemaVersion: 1, ...result })); return result;
   });
-  tasks.set(id, task);
-  void task.finally(() => tasks.delete(id)).catch(() => undefined);
+  pending.set(ctx, task);
+  void task.finally(() => pending.delete(ctx)).catch(() => undefined);
   return task;
 }

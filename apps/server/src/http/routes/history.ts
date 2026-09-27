@@ -6,15 +6,15 @@ import type { HttpDeps } from '../server.js';
 import { requireUser, workspaceOf } from '../server.js';
 import { getCodexHistory, runCodexHistory } from '../../services/codex-history.js';
 import { getWorkbuddyHistory, runWorkbuddyHistory } from '../../services/workbuddy-history.js';
-import { clientLabels, getLocalClientHistory, runLocalClientHistory } from '../../services/local-client-history.js';
+import { getOpencodeHistory, runOpencodeHistory } from '../../services/opencode-history.js';
 
 export function registerCodexHistoryRoutes(fastify: FastifyInstance, deps: HttpDeps): void {
-  for (const id of ['opencode', 'doubao'] as const) for (const method of ['GET', 'POST'] as const) {
-    fastify.route({ method, url: `/api/history/${id}`, handler: async (request, reply) => {
-      requireUser(request, `${clientLabels[id]}本机历史`);
+  for (const method of ['GET', 'POST'] as const) {
+    fastify.route({ method, url: '/api/history/opencode', handler: async (request, reply) => {
+      requireUser(request, 'OpenCode 本机历史');
       reply.header('Cache-Control', 'no-store');
       if (workspaceOf(request) !== 'real') throw new ApiError(403, 'forbidden', '本机历史只在真实工作区可查看或扫描。');
-      return method === 'GET' ? getLocalClientHistory(deps.app.ctx, id) : runLocalClientHistory(deps.app.ctx, id);
+      return method === 'GET' ? getOpencodeHistory(deps.app.ctx) : runOpencodeHistory(deps.app.ctx);
     } });
   }
   for (const method of ['GET', 'POST'] as const) {

@@ -5,7 +5,7 @@ import type { ServiceContext } from '../service-context.js';
 import { getCodexHistory } from './codex-history.js';
 import { getDeepseekHistory } from './deepseek-history.js';
 import { getWorkbuddyHistory } from './workbuddy-history.js';
-import { clientLabels, getLocalClientHistory } from './local-client-history.js';
+import { getOpencodeHistory } from './opencode-history.js';
 import { importedHistory } from './history-imported.js';
 
 export interface HistoryTotalSource {
@@ -126,12 +126,11 @@ export function historyTotal(
   let workbuddyKnown = false;
   let opencodeKnown = false;
   if (workspace === 'real') {
-    for (const id of ['opencode', 'doubao'] as const) {
-      const history = getLocalClientHistory(ctx, id);
-      const known = history.status === 'ok' && history.totals.totalTokens !== null;
-      if (id === 'opencode') opencodeKnown = known;
-      candidates.push({ id, label: `${clientLabels[id]}本机历史`, totalTokens: history.totals.totalTokens,
-        included: known, reason: known ? null : id === 'doubao' ? '本地任务未提供 Token，用量未知' : '尚无可用的 OpenCode 历史总量',
+    {
+      const history = getOpencodeHistory(ctx);
+      opencodeKnown = history.status === 'ok' && history.totals.totalTokens !== null;
+      candidates.push({ id: 'opencode', label: 'OpenCode 本机历史', totalTokens: history.totals.totalTokens,
+        included: opencodeKnown, reason: opencodeKnown ? null : '尚无可用的 OpenCode 历史总量',
         partial: true, warnings: history.warnings });
     }
     const codex = getCodexHistory(ctx);

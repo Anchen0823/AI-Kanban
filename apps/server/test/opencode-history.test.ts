@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { normalizeOpencodeTokens, scanLocalClientHistory, runLocalClientHistory } from '../src/services/local-client-history.js';
+import { normalizeOpencodeTokens, scanOpencodeHistory, runOpencodeHistory } from '../src/services/opencode-history.js';
 import { historyTotal } from '../src/services/history-total.js';
 import { createHarness, importCsv } from './helpers.js';
 
@@ -39,8 +39,8 @@ test('OpenCode normalizes cache and reasoning into inclusive totals exactly once
 test('OpenCode counts steps or fallback message, skips unknown placeholders, preserves read-only DB', async () => {
   const f = await fixture();
   try {
-    const first = await scanLocalClientHistory('opencode', f);
-    const second = await scanLocalClientHistory('opencode', f);
+    const first = await scanOpencodeHistory(f);
+    const second = await scanOpencodeHistory(f);
     assert.equal(first.status, 'ok');
     assert.equal(first.totals.totalTokens, 123);
     assert.deepEqual(first.totals, second.totals);
@@ -52,39 +52,34 @@ test('OpenCode counts steps or fallback message, skips unknown placeholders, pre
     assert.ok(!JSON.stringify(first).includes('SECRET'));
     const db = new DatabaseSync(f.databasePath, { readOnly: true });
     assert.equal(db.prepare('SELECT count(*) AS n FROM message').get()?.n, 5); db.close();
-    const limited = await scanLocalClientHistory('opencode', { ...f, maxRecords: 1 });
+    const limited = await scanOpencodeHistory({ ...f, maxRecords: 1 });
     assert.ok(limited.warnings.some(x => x.includes('上限')));
   } finally { await rm(f.dir, { recursive: true, force: true }); }
 });
 
-test('Doubao detected tasks remain unknown, missing databases are never created', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'aicc-doubao-'));
+test('Missing OpenCode database stays unknown and is never created', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'aicc-opencode-missing-'));
   try {
-    await mkdir(join(dir, '123')); await mkdir(join(dir, '456')); await mkdir(join(dir, 'not-a-session'));
-    const result = await scanLocalClientHistory('doubao', { doubaoSessionsPath: dir });
-    assert.equal(result.sessionCount, 2); assert.equal(result.status, 'empty');
-    assert.equal(result.totals.totalTokens, null);
-    const missing = await scanLocalClientHistory('opencode', { databasePath: join(dir, 'missing.db') });
+    const missing = await scanOpencodeHistory({ databasePath: join(dir, 'missing.db') });
     assert.equal(missing.status, 'error'); assert.equal(missing.totals.totalTokens, null);
     const { readdir } = await import('node:fs/promises');
     assert.ok(!(await readdir(dir)).includes('missing.db'));
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('New client histories enforce auth/workspace, persist, aggregate and exclude matching imports', async () => {
+test('OpenCode history enforces auth/workspace, persists, aggregates and excludes matching imports', async () => {
   const h = await createHarness(); const f = await fixture();
   try {
-    await runLocalClientHistory(h.app.ctx, 'opencode', f);
-    await runLocalClientHistory(h.app.ctx, 'doubao', { doubaoSessionsPath: f.dir });
-    for (const id of ['opencode', 'doubao']) for (const method of ['GET', 'POST'] as const) {
-      assert.equal((await h.anonymous(method, `/api/history/${id}`)).status, 401);
-      assert.equal((await h.request(method, `/api/history/${id}?workspace=demo`)).status, 403);
+    await runOpencodeHistory(h.app.ctx, f);
+    for (const method of ['GET', 'POST'] as const) {
+      assert.equal((await h.anonymous(method, '/api/history/opencode')).status, 401);
+      assert.equal((await h.request(method, '/api/history/opencode?workspace=demo')).status, 403);
     }
     const account = await h.request<{account: {id: string}}>('POST', '/api/accounts', { provider: 'OpenCode', alias: 'test', currency: 'USD' });
     await importCsv(h, 'opencode.csv', 'occurred_at,request_id,model,input_tokens,output_tokens,total_tokens\n2026-09-26T00:00:00Z,request,model,10,1,11', { accountId: account.body.account.id });
     const total = historyTotal(h.app.ctx);
     assert.equal(total.totalTokens, 123);
-    assert.equal(total.sources.find(x => x.id === 'doubao')?.included, false);
+    assert.equal(total.sources.some(x => x.id === 'doubao'), false);
     assert.equal(total.sources.find(x => x.id === 'imported:OpenCode')?.included, false);
     assert.ok(!historyTotal(h.app.ctx, 'demo').sources.some(x => x.id === 'opencode'));
     assert.equal((await h.request('GET', '/api/history/opencode')).status, 200);

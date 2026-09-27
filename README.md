@@ -9,7 +9,7 @@
 
 WorkBuddy 历史用量已支持：在首页点击「同步 WorkBuddy」，读取本机项目日志并加入累计 Token，支持模型和日期明细。无需 MCP 或 API Key，范围说明见 [WorkBuddy 历史用量](./docs/08-workbuddy-history.md)。
 
-OpenCode 支持读取本机数据库同步历史 Token；豆包工作支持检测本地任务，当前日志未提供 Token，显示未知且不计入总量。详见 [本地客户端接入](./docs/09-local-clients.md)。
+OpenCode 支持读取本机数据库同步历史 Token，详见 [OpenCode 历史用量](./docs/09-opencode-history.md)。
 
 本仓库当前实现到设计稿 §16 的 **M1**，分两段看：
 

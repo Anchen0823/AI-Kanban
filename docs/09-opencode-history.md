@@ -1,6 +1,6 @@
-# OpenCode 与豆包工作
+# OpenCode 历史用量
 
-首页增加 OpenCode「同步」和豆包工作「检测」入口，保持原有简洁卡片样式。
+首页增加 OpenCode「同步」入口，保持原有简洁卡片样式。
 
 ## OpenCode
 
@@ -10,15 +10,10 @@
 
 OpenCode 的 `input` 是非缓存输入，`output` 不含单列推理：看板输入 = input + cache.read + cache.write；输出 = output + reasoning；总量 = 输入 + 输出。缓存读取、推理仍以子项显示，不再次加到总量。字段缺失、计数冲突和整数溢出不会静默填零。口径依据 [OpenCode Session.getUsage 源码](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/session.ts)，路径依据 [官方排错文档](https://opencode.ai/v2/docs/troubleshooting)。
 
-## 豆包工作：已接入本地检测，Token 尚不可用
-
-读取 `%LOCALAPPDATA%/Doubao/User Data/Default/.doubao/agent_mode/workspace/.sessions` 的任务目录数量；可用 `AICC_DOUBAO_SESSIONS` 指定其他任务目录。本机检查到的 `trajectory.jsonl` 只记录消息与工具调用，没有 Token、模型或请求用量字段，其他已检查的工作专用目录也未提供可用的统计记录。因此卡片显示发现的本地任务数、Token 未知，不计入全部 AI 累计，不按文本长度估算，也不将检测成功称为 Token 同步成功。这个结论仅针对目前已验证的本地记录格式。
-
 ## 接口与边界
 
-- `GET /api/history/opencode`、`GET /api/history/doubao`：读取汇总缓存。
-- 同路径 `POST`：同步或检测。仅本地用户、真实工作区可调用，拒绝匿名、代理凭据和示例工作区。
+- `GET /api/history/opencode`：读取汇总缓存；同路径 `POST`：同步。仅本地用户、真实工作区可调用，拒绝匿名、代理凭据和示例工作区。
 - 专用历史存在时，标记为 OpenCode 的通用导入从总量排除。客户端通过自定义供应商 API 产生的用量仍可能与供应商账单重叠，尚不能跨来源逐请求去重。
 - 仅本机现存记录；清理、删除、其他设备或未落盘的请求无法还原。
 
-验证：`npm test`、`npm run typecheck`、`npm run build`。可选本机实测：PowerShell 设置 `$env:AICC_VERIFY_LOCAL_CLIENTS='1'`，运行 `npm run verify:desktop`；使用独立数据目录验证两个按钮、重复同步和汇总纳入状态。
+验证：`npm test`、`npm run typecheck`、`npm run build`。可选本机实测：PowerShell 设置 `$env:AICC_VERIFY_OPENCODE='1'`，运行 `npm run verify:desktop`；使用独立数据目录验证同步按钮、重复同步和汇总纳入状态。
