@@ -54,10 +54,10 @@ export function App(): ReactNode {
     <header className="observatory-nav glass">
       <a className="aqua-brand" href="#overview" aria-label="AI Control Center 首页"><span className="brand-prism" aria-hidden="true">✧</span><span>AI Control Center</span></a>
       <nav aria-label="统计区块">{[['overview','总览'],['activity','趋势'],['models','模型'],['sources','数据源']].map(([id,label]) => <a key={id} href={`#${id}`} aria-current={section === id ? 'location' : undefined}>{label}</a>)}</nav>
-      <div className="nav-controls"><span className="connection-label"><i className="live-dot" />本地连接</span><button onClick={reload} aria-label="刷新统计" title="重新读取已同步的数据">↻</button><button aria-label="切换界面动效" aria-pressed={motion} onClick={() => setMotion(!motion)} title="切换界面动效">✧</button><button aria-label={fullscreen ? '退出全屏' : '进入全屏'} title={fullscreen ? '退出全屏' : '进入全屏'} onClick={async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { /* Keep the normal desktop window when fullscreen is unavailable. */ } }}>⛶</button></div>
+      <div className="nav-controls"><span className="connection-label" title="本地服务运行中"><i className="live-dot" /></span><button onClick={reload} aria-label="刷新统计" title="重新读取已同步的数据">↻</button><button aria-label="切换界面动效" aria-pressed={motion} onClick={() => setMotion(!motion)} title="切换界面动效">✧</button><button aria-label={fullscreen ? '退出全屏' : '进入全屏'} title={fullscreen ? '退出全屏' : '进入全屏'} onClick={async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { /* Keep the normal desktop window when fullscreen is unavailable. */ } }}>⛶</button></div>
     </header>
     <main className="observatory-main">
-      {hasDemo && <div className="workspace-switch"><button aria-pressed={workspace === 'real'} onClick={() => switchWorkspace('real')}>真实数据</button><button aria-pressed={workspace === 'demo'} onClick={() => switchWorkspace('demo')}>示例数据</button>{workspace === 'demo' && <span>正在查看示例数据 · 合成数据不计入真实统计</span>}</div>}
+      {hasDemo && <div className="workspace-switch"><button aria-pressed={workspace === 'real'} onClick={() => switchWorkspace('real')}>真实数据</button><button aria-pressed={workspace === 'demo'} onClick={() => switchWorkspace('demo')}>示例数据</button>{workspace === 'demo' && <span>合成数据不计入真实统计</span>}</div>}
       <Telemetry key={workspace} refreshToken={refreshToken} reload={reload} />
     </main>
   </div>;
