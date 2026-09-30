@@ -15,7 +15,7 @@ import type { ServiceContext } from '../service-context.js';
 import { getSetting, setSetting } from '../db/repos/system.js';
 
 const SETTING_KEY = 'history.codex';
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const MAX_FILES = 10_000;
 const MAX_LINE_CHARS = 1_000_000;
 const MAX_WARNINGS = 40;
@@ -206,6 +206,10 @@ async function scanFile(path: string, sessions: Map<string, SessionData>, warnin
       if (!payload) continue;
 
       if (row.type === 'session_meta') {
+        // Forks embed the parent's history, including its session_meta. Only the
+        // first valid metadata identifies this rollout; inherited metadata must
+        // not merge independent cumulative counters into the parent session.
+        if (sessionId !== null) continue;
         sessionId = readString(payload.id) ?? readString(payload.session_id);
         const session = sessionId ? sessions.get(sessionId) ?? { events: new Map<string, UsageEvent>(), parentIds: new Set<string>() } : null;
         if (sessionId && session) {

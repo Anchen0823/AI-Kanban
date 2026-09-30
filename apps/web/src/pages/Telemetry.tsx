@@ -117,21 +117,22 @@ function MiniSpark({days}: {days:Point[]}) {
   const points = days.filter(d => d.value != null).slice(-20); const max = Math.max(1,...points.map(p => p.value!));
   return <svg viewBox="0 0 130 40"><path d={points.length > 1 ? smoothPath(points.map((p,i) => ({x:i / (points.length-1)*130,y:37-p.value!/max*32}))) : 'M0 32H130'} fill="none" stroke="currentColor" strokeWidth="2" /></svg>;
 }
-function TrendChart({ days, mode }: { days: Point[]; mode: 'area' | 'bar' }) {
+export function TrendChart({ days, mode }: { days: Point[]; mode: 'area' | 'bar' }) {
   const [hover,setHover] = useState<number | null>(null);
   const max = Math.max(1,...days.map(p => p.value ?? 0));
   const width=720, height=190, left=52, right=704, top=12, bottom=157;
   const x = (i:number) => left + (i+.5)/Math.max(1,days.length)*(right-left);
   const y = (v:number) => bottom-v/max*(bottom-top);
-  const groups: {p:Point;i:number}[][] = [];
-  let group: {p:Point;i:number}[] = [];
-  days.forEach((p,i) => { if(p.value == null) { if(group.length) groups.push(group); group=[]; } else group.push({p,i}); }); if(group.length) groups.push(group);
+  // Keep calendar positions while connecting observations across missing days.
+  // Missing dates remain unknown in totals, bars and tooltips.
+  const group = days.map((p,i) => ({p,i})).filter(({p}) => p.value != null);
+  const groups = group.length ? [group] : [];
   const current = hover != null ? days[hover] : null;
   return <div className="trend-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`每日 Token ${mode === 'area' ? '曲线图' : '柱状图'}`} onMouseLeave={() => setHover(null)}>
     <defs><linearGradient id="aqua-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3abdc7" stopOpacity=".27"/><stop offset="100%" stopColor="#3abdc7" stopOpacity=".015"/></linearGradient></defs>
     {[0,.25,.5,.75,1].map(f => <g key={f}><line x1={left} x2={right} y1={y(max*f)} y2={y(max*f)} stroke="#e5edef" strokeDasharray="3 5"/><text x={left-10} y={y(max*f)+4} textAnchor="end">{number(max*f,true)}</text></g>)}
     {mode === 'area' ? groups.map((g,i) => { const d=smoothPath(g.map(({p,i}) => ({x:x(i),y:y(p.value!)}))); return <g key={i}><path d={`${d} L${x(g.at(-1)!.i)},${bottom} L${x(g[0]!.i)},${bottom} Z`} fill="url(#aqua-area)"/><path d={d} fill="none" stroke="#16a9b5" strokeWidth="2.5" strokeLinejoin="round"/>{g.length===1 && <circle cx={x(g[0]!.i)} cy={y(g[0]!.p.value!)} r="3" fill="#16a9b5"/>}</g>; }) : days.map((p,i) => p.value == null ? null : <rect key={p.day} x={x(i)-Math.max(1,(right-left)/days.length*.62)/2} y={y(p.value)} width={Math.max(1,(right-left)/days.length*.62)} height={Math.max(1,bottom-y(p.value))} rx="2" fill="#38b6c2"/>)}
-    {days.map((p,i) => <rect key={p.day} x={left+i/days.length*(right-left)} y={top} width={(right-left)/days.length} height={bottom-top} fill="transparent" onMouseEnter={() => setHover(i)}><title>{p.day}: {p.value == null ? '没有记录' : `${number(p.value)} Token`}</title></rect>)}
+    {days.map((p,i) => <rect key={p.day} x={left+i/days.length*(right-left)} y={top} width={(right-left)/days.length} height={bottom-top} fill="transparent" onMouseEnter={() => setHover(i)}><title>{`${p.day}: ${p.value == null ? '没有记录' : `${number(p.value)} Token`}`}</title></rect>)}
     {hover != null && current && <g pointerEvents="none"><line x1={x(hover)} x2={x(hover)} y1={top} y2={bottom} stroke="#499ea8" strokeDasharray="3 4"/>{current.value != null && <circle cx={x(hover)} cy={y(current.value)} r="4" fill="#fff" stroke="#16a9b5" strokeWidth="2"/>}</g>}
     {[...new Set([0,Math.floor((days.length-1)/2),days.length-1])].filter(i=>i>=0 && days[i]).map(i => <text key={i} x={x(i)} y="182" textAnchor="middle">{days[i]!.day.slice(5)}</text>)}
   </svg>{!days.some(d=>d.value!=null) && <div className="chart-no-data">暂无趋势数据</div>}{current && <div className="chart-tooltip" role="status">{current.day} <b>{current.value == null ? '没有记录' : `${number(current.value)} Token`}</b></div>}</div>;

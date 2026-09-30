@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getSetting } from '../src/db/repos/system.js';
+import { getSetting, setSetting } from '../src/db/repos/system.js';
 import { getCodexHistory, runCodexHistory, scanCodexHistory } from '../src/services/codex-history.js';
 import { createHarness } from './helpers.js';
 
@@ -55,7 +55,10 @@ async function fixtureHome(): Promise<string> {
   await writeFile(join(live, 'rollout-reset.jsonl'), sessionB, 'utf8');
 
   const sessionC = [
-    line('session_meta', { id: 'session-c', parent_session_id: 'session-a' }, 0, '2026-09-19T01:00:00.000Z'),
+    line('session_meta', { id: 'session-c', session_id: 'session-a', forked_from_id: 'session-a' }, 0, '2026-09-19T01:00:00.000Z'),
+    // Real forks embed the parent's metadata after their own. It must not
+    // overwrite the child identity and interleave two independent counters.
+    line('session_meta', { id: 'session-a' }, 1, '2026-09-18T00:00:00.000Z'),
     line('turn_context', { model: 'gpt-fixture-c' }, 1, '2026-09-19T01:01:00.000Z'),
     // fork 会继承父会话的累计前缀；这两条与 session-a 完全相同。
     line('event_msg', usage(10, 2, 3, 1, 13), 2, '2026-09-18T00:02:00.000Z'),
@@ -66,6 +69,8 @@ async function fixtureHome(): Promise<string> {
 
   const sessionD = [
     line('session_meta', { id: 'session-d', parent_session_id: 'session-c' }, 0, '2026-09-19T01:04:00.000Z'),
+    line('session_meta', { id: 'session-c', parent_session_id: 'session-a' }, 1, '2026-09-19T01:00:00.000Z'),
+    line('session_meta', { id: 'session-a' }, 2, '2026-09-18T00:00:00.000Z'),
     line('turn_context', { model: 'gpt-fixture-d' }, 1, '2026-09-19T01:04:10.000Z'),
     // 三代分叉：D 继承 C 的完整累计轨迹，只有最后一条是自己的新增用量。
     line('event_msg', usage(10, 2, 3, 1, 13), 2, '2026-09-18T00:02:00.000Z'),
@@ -129,6 +134,10 @@ test('历史扫描缓存只保存聚合数字；未扫描时不把 token 报成 
     const before = getCodexHistory(h.app.ctx);
     assert.equal(before.status, 'not_scanned');
     assert.equal(before.totals.totalTokens, null);
+
+    setSetting(h.app.db, 'history.codex', JSON.stringify({ schemaVersion: 1, ...before, status: 'ok', checkedAt: '2026-09-29T00:00:00.000Z', totals: { ...before.totals, totalTokens: 5_904_495_092 } }));
+    assert.equal(getCodexHistory(h.app.ctx).status, 'not_scanned');
+    assert.equal(getCodexHistory(h.app.ctx).totals.totalTokens, null);
 
     const scanned = await runCodexHistory(h.app.ctx, { codexHome: home });
     assert.equal(scanned.status, 'ok');

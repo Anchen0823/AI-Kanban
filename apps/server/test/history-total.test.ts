@@ -14,7 +14,7 @@ import { createHarness, importCsv } from './helpers.js';
 
 function saveCodex(h: Awaited<ReturnType<typeof createHarness>>, totalTokens: number): void {
   setSetting(h.app.db, 'history.codex', JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: 'ok',
     checkedAt: '2026-09-19T00:00:00.000Z',
     totals: {
