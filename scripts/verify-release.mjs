@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 const root = fileURLToPath(new URL('../', import.meta.url));
-const distribution = join(root, 'release/current');
+const distribution = resolve(process.argv[2] ?? join(root, 'release/current'));
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
 const portable = join(distribution, `AI-Control-Center-${version}-x64.exe`);
 if (!existsSync(portable)) throw new Error('Run npm run desktop:pack before verifying this version.');

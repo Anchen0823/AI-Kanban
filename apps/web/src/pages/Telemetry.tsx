@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { smoothPath } from '../chart-path.js';
 import { AdaptiveNumber } from '../AdaptiveNumber.js';
 import { api, getWorkspace } from '../api.js';
-import { aggregate, cacheInputRate, buildSources, calendarDays, formatNumber as number, LOCAL_SOURCES, sumKnown, type SourceData, type TotalHistory } from '../analytics.js';
+import { aggregate, cacheInputSummary, buildSources, calendarDays, formatNumber as number, LOCAL_SOURCES, sumKnown, type SourceData, type TotalHistory } from '../analytics.js';
 
 const COLORS = ['#18aab8', '#63a4ee', '#52bea2', '#9a98df', '#e4b06b', '#6c9da9'];
 type Point = { day: string; value: number | null };
@@ -27,6 +27,7 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
   const [navTarget, setNavTarget] = useState<HTMLElement | null>(null);
   useEffect(() => setNavTarget(document.getElementById('nav-sync')), []);
   useEffect(() => historySync.onCompleted(reload), [reload]);
+  useEffect(() => { if (demo) { setDirectory(''); setDeepseekOpen(false); } }, [demo]);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -35,6 +36,7 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
       setTotal(snapshot.total);
       const next = buildSources(snapshot.total, snapshot.local, snapshot.imported);
       setSources(next);
+      if (!demo && snapshot.local.deepseek?.sourceDirectory) setDirectory(current => current || snapshot.local.deepseek!.sourceDirectory!);
       const latest = next.map(s => s.sync ? s.sync.lastSuccessAt : s.checkedAt).filter((at): at is string => !!at).sort().at(-1);
       setUpdated(latest ? new Date(latest).toLocaleString('zh-CN', { hour12: false }) : null);
       setErrors([]); setLoading(false);
@@ -54,7 +56,8 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
   const visibleDays = useMemo(() => calendarDays(data.days, period || (data.days.length ? Math.round((Date.parse(data.days.at(-1)!.day) - Date.parse(data.days[0]!.day)) / 86400000) + 1 : 0)), [data.days, period]);
   const heatDays = useMemo(() => calendarDays(data.days, 91), [data.days]);
   const activeTotal = selected === 'all' ? total?.totalTokens : sources.find(s => s.id === selected)?.total;
-  const cachedRate = cacheInputRate(data.active);
+  const cacheSummary = cacheInputSummary(data.active);
+  const cachedRate = cacheSummary.rate;
   const endDay = data.days.at(-1)?.day;
   const dailySum = sumKnown(visibleDays.map(p => p.value));
   const peak = visibleDays.reduce<Point | null>((best, p) => p.value != null && (best == null || p.value > (best.value ?? -1)) ? p : best, null);
@@ -72,7 +75,7 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
       <Kpi title="累计 Token" value={fmt(activeTotal)} exact={number(activeTotal)} note={codexNote} hero><MiniSpark days={data.days} /></Kpi>
       <Kpi title="输入 Token" value={fmt(data.input)} exact={number(data.input)}><span className="kpi-glyph">↗</span></Kpi>
       <Kpi title="输出 Token" value={fmt(data.output)} exact={number(data.output)}><span className="kpi-glyph">↙</span></Kpi>
-      <Kpi title="缓存输入占比" value={cachedRate == null ? '—' : `${cachedRate.toFixed(1)}%`} exact={cachedRate == null ? '缓存与输入的覆盖不完整、未知或数值异常，不能计算占比。' : `${number(data.cached)} / ${number(data.input)}`}><svg className="cache-ring" viewBox="0 0 50 50" aria-hidden="true"><circle cx="25" cy="25" r="19" /><circle cx="25" cy="25" r="19" pathLength="100" strokeDasharray={`${cachedRate ?? 0} 100`} /></svg></Kpi>
+      <Kpi title="缓存输入占比" value={cachedRate == null ? '—' : `${cachedRate.toFixed(1)}%`} exact={cacheSummary.explanation} note={cacheSummary.note}><svg className="cache-ring" viewBox="0 0 50 50" aria-hidden="true"><circle cx="25" cy="25" r="19" /><circle cx="25" cy="25" r="19" pathLength="100" strokeDasharray={`${cachedRate ?? 0} 100`} /></svg></Kpi>
     </section>
     <div className="chart-grid" id="activity">
       <section className="data-panel trend-panel"><PanelHead title="用量趋势" accessory={<div className="segmented" aria-label="趋势时间范围">{[[7,'7 天'],[30,'30 天'],[90,'90 天'],[0,'全部']].map(([value,text]) => <button key={value} aria-pressed={period === value} onClick={() => setPeriod(Number(value))}>{text}</button>)}</div>} />
@@ -106,7 +109,7 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
           {failed && !demo && <details className="source-error"><summary>失败原因</summary><p>{failure}</p></details>}
         </div>;
       })}</div>
-      {deepseekOpen && <form className="deepseek-form" onSubmit={e => { e.preventDefault(); void sync('deepseek'); }}><label htmlFor="deepseek-directory">DeepSeek 导出目录</label><div><input id="deepseek-directory" value={directory} onChange={e => setDirectory(e.target.value)} placeholder="包含 ZIP / CSV 的文件夹路径" required /><button className="sync-button" disabled={progress.deepseek?.phase === 'running' || progress.deepseek?.phase === 'queued' || !directory.trim()}>读取并统计</button></div></form>}
+      {deepseekOpen && <form className="deepseek-form" onSubmit={e => { e.preventDefault(); void sync('deepseek'); }}><label htmlFor="deepseek-directory">DeepSeek 导出目录</label><div><input id="deepseek-directory" value={directory} onChange={e => setDirectory(e.target.value)} placeholder="包含 ZIP / CSV 的文件夹路径" required /><button className="sync-button" disabled={progress.deepseek?.phase === 'running' || progress.deepseek?.phase === 'queued' || !directory.trim()}>读取并统计</button></div><p className="panel-note">记住上次成功读取的目录，下次自动填入；仍由你按需读取。</p></form>}
       <details className="methodology"><summary>统计口径</summary><div className="analytics-table"><table><thead><tr><th>来源</th><th className="num">Token</th><th>合计规则</th></tr></thead><tbody>{sources.map(source => <tr key={source.id} data-source={source.id}><td>{source.label}{source.id === 'codex' ? source.statisticsSource === 'official' ? '（官方统计）' : '（本机日志）' : ''}</td><td className="num">{number(source.total)}</td><td>{source.included ? '已计入' : source.reason ?? '未知'} <button disabled={source.total == null} aria-label={`查看 ${source.label}`} onClick={() => setSelected(source.id)}>查看</button></td></tr>)}</tbody></table></div><p>总量以服务端统计为准，图表仅聚合已计入的来源；无记录的日期保持未知；曲线跨缺失日期实线连接仅用于展示趋势，不补入每日数值或区间合计。Codex 优先采用官方累计与每日记录。官方会话估算明细完整且与官方累计核对一致时，输入、输出、缓存及模型排行采用官方明细，否则采用本机日志。部分明细不冒充全账户明细，官方累计与本机日志不相加，未知分项不按比例补齐。官方数据不可用时回退并标明原因。本机记录按 UTC 日期，官方及 DeepSeek 按返回日期，跨来源的日边界可能不同。</p>{codexSource?.officialDetails && <p>{codexSource.officialDetails.message}{codexSource.officialDetails.status === 'partial' ? ` 已返回明细合计 ${number(codexSource.officialDetails.totals.totalTokens)} Token。` : ''}</p>}{[...new Set([...(total?.warnings ?? []),...data.active.flatMap(s => s.warnings)])].map(w => <p key={w}>{w}</p>)}</details>
     </section>
     <footer className="observatory-footer"><span><i className="live-dot" /> 本地存储</span></footer>

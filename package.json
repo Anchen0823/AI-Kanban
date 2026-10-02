@@ -1,6 +1,6 @@
 {
   "name": "ai-control-center",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "AI Control Center — 个人 AI 历史用量与额度工作台",
   "type": "module",

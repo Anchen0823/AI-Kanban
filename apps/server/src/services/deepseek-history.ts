@@ -1,16 +1,17 @@
-import { tokenCoverage, type HistorySnapshot } from '@aicc/core';
+import { collectCacheInputSample, tokenCoverage, type HistorySnapshot } from '@aicc/core';
 import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
 /** DeepSeek 控制台导出 ZIP/CSV 的脱敏历史汇总。 */
 
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { unzipSync } from 'fflate';
-import { getSetting } from '../db/repos/system.js';
+import { getSetting, setSetting } from '../db/repos/system.js';
 import { parseCsv } from '../imports/parse.js';
 import type { ServiceContext } from '../service-context.js';
 
 const SETTING_KEY = 'history.deepseek';
+const DIRECTORY_KEY = 'history.deepseek.directory';
 const SCHEMA_VERSION = 1;
 const MAX_SOURCE_FILES = 100;
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
@@ -423,7 +424,8 @@ function stored(ctx: ServiceContext): DeepseekHistoryResponse | null {
 }
 
 export function getDeepseekHistory(ctx: ServiceContext): DeepseekHistoryResponse {
-  return withHistorySync(ctx, SETTING_KEY, stored(ctx) ?? emptyResponse('尚未扫描 DeepSeek 控制台导出。'));
+  return { ...withHistorySync(ctx, SETTING_KEY, stored(ctx) ?? emptyResponse('尚未扫描 DeepSeek 控制台导出。')),
+    sourceDirectory: getSetting(ctx.db, DIRECTORY_KEY) };
 }
 
 /** 只读扫描指定目录；不会保存原始身份、API Key、文件名或目录。 */
@@ -511,14 +513,16 @@ export async function scanDeepseekHistory(options: DeepseekHistoryScanOptions): 
     if (lastAt === null || row.endAt > lastAt) lastAt = row.endAt;
   }
 
-  const fieldCoverage = tokenCoverage([...coverageGroups.values()].map(group => ({
+  const coverageRows = [...coverageGroups.values()].map(group => ({
     inputTokens: group.seenCacheHit && group.seenCacheMiss ? safeNumber(group.cacheHit + group.cacheMiss, warnings) : null,
     cachedInputTokens: group.seenCacheHit ? safeNumber(group.cacheHit, warnings) : null,
     outputTokens: group.seenOutput ? safeNumber(group.output, warnings) : null,
     totalTokens: group.seenCacheHit && group.seenCacheMiss && group.seenOutput ? safeNumber(group.cacheHit + group.cacheMiss + group.output, warnings) : null,
-  })), totals(aggregate, warnings));
+  }));
+  const fieldCoverage = tokenCoverage(coverageRows, totals(aggregate, warnings));
   return {
     coverage: fieldCoverage,
+    cacheInputSample: collectCacheInputSample(coverageRows),
     status: 'ok',
     checkedAt,
     totals: totals(aggregate, warnings),
@@ -544,8 +548,12 @@ export async function scanDeepseekHistory(options: DeepseekHistoryScanOptions): 
 
 export async function runDeepseekHistory(
   ctx: ServiceContext,
-  options: DeepseekHistoryScanOptions,
+  options: Partial<DeepseekHistoryScanOptions> = {},
 ): Promise<DeepseekHistoryResponse> {
-  const result = await scanDeepseekHistory({ ...options, now: () => ctx.now() });
-  return saveHistoryAttempt(ctx, SETTING_KEY, SCHEMA_VERSION, result, options.directory, true, true);
+  const directory = options.directory?.trim() ?? getSetting(ctx.db, DIRECTORY_KEY) ?? '';
+  const result = await scanDeepseekHistory({ directory, now: () => ctx.now() });
+  const saved = saveHistoryAttempt(ctx, SETTING_KEY, SCHEMA_VERSION, result, directory, true, true);
+  // Remember the successful selection separately from the de-identified statistics.
+  if (result.status === 'ok' || result.status === 'empty') setSetting(ctx.db, DIRECTORY_KEY, resolve(directory));
+  return { ...saved, sourceDirectory: getSetting(ctx.db, DIRECTORY_KEY) };
 }

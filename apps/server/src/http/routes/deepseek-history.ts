@@ -6,7 +6,7 @@ import { getDeepseekHistory, runDeepseekHistory } from '../../services/deepseek-
 import { ApiError } from '../errors.js';
 import { requireUser, workspaceOf, type HttpDeps } from '../server.js';
 
-const zScan = z.object({ directory: z.string().trim().min(1).max(4096) }).strict();
+const zScan = z.object({ directory: z.string().trim().min(1).max(4096).optional() }).strict();
 
 export function registerDeepseekHistoryRoutes(fastify: FastifyInstance, deps: HttpDeps): void {
   fastify.get('/api/history/deepseek', async (request, reply) => {

@@ -221,6 +221,26 @@ try {
   await clickLabel('读取并统计');
   await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.getAttribute('title') === ${JSON.stringify((expectedTotal-deepseekImport+38).toLocaleString('zh-CN'))}`));
   assert.equal(await evaluate(`fetch('/api/history/total').then(r => r.json()).then(r => r.sources.find(s => s.id === 'imported:DeepSeek').included)`), false);
+  // A new page restores the last successful directory, and sparse input/cache
+  // buckets use matched groups only, with visible coverage beside the ratio.
+  await reloadPage();
+  await waitFor(() => evaluate(`document.querySelector('.telemetry')?.getAttribute('aria-busy') === 'false'`));
+  await clickLabel('读取历史导出 ↗');
+  await waitFor(() => evaluate(`document.querySelector('#deepseek-directory')?.value === ${JSON.stringify(exportDirectory)}`));
+  writeFileSync(join(exportDirectory, 'sparse.csv'), [
+    'user_id,start_time_iso,end_time_iso,model,api_key_name,api_key,type,price,amount',
+    'qa,2026-09-01T00:00:00+08:00,2026-09-02T00:00:00+08:00,deepseek-chat,other,other,input_cache_miss_tokens,0,100',
+    'qa,2026-09-01T00:00:00+08:00,2026-09-02T00:00:00+08:00,deepseek-chat,other,other,output_tokens,0,1',
+  ].join('\n'));
+  await clickLabel('读取并统计');
+  await waitFor(() => evaluate(`!document.querySelector('#deepseek-directory')`));
+  await evaluate(`document.querySelector('.source-tile[data-source="deepseek"] .source-actions button:last-child').click()`);
+  await waitFor(() => evaluate(`document.querySelectorAll('.kpi-value')[3]?.textContent === '39.4%'`));
+  assert.match(await evaluate(`document.querySelectorAll('.kpi')[3].textContent`), /部分记录.*24.8% 已知输入/);
+  assert.match(await evaluate(`document.querySelectorAll('.kpi-value')[3].title`), /DeepSeek：1 \/ 2/);
+  await capture('cache-partial-coverage.png');
+  await clickLabel('查看全部');
+  console.log('PASS: partial cache ratio uses matching groups, displays coverage, and restores the saved export directory after reload.');
   assert.equal(await evaluate(`document.body.innerText.includes('同步完成，已重新读取可用统计。')`),false);
   await evaluate(`document.querySelector('.methodology').open = true; document.querySelector('tr[data-source="imported:DeepSeek"] button').click()`);
   await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.title === ${JSON.stringify(deepseekImport.toLocaleString('zh-CN'))}`));
@@ -272,7 +292,8 @@ try {
     saveCodexFixture(codexFixture);
     await selectCodexFixture();
     await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.title === '100'`));
-    assert.equal(await evaluate(`document.querySelectorAll('.kpi:not(.hero-kpi) .kpi-note').length`), 0);
+    assert.equal(await evaluate(`document.querySelectorAll('.kpi')[1].querySelector('.kpi-note') === null && document.querySelectorAll('.kpi')[2].querySelector('.kpi-note') === null`), true);
+    assert.match(await evaluate(`document.querySelectorAll('.kpi')[3].querySelector('.kpi-note').textContent`), /暂无字段齐全/);
     assert.equal(await evaluate(`document.querySelectorAll('.kpi')[1].querySelector('.kpi-value').title`), '10');
     assert.equal(await evaluate(`document.querySelectorAll('.kpi')[3].querySelector('.kpi-value').textContent`), '—', 'Legacy coverage must not invent a cache ratio');
     assert.doesNotMatch(await evaluate(`document.querySelector('.chart-foot').textContent`), /官方统计|本机日志/);
@@ -290,7 +311,7 @@ try {
     assert.match(await evaluate(`document.querySelector('.model-panel').textContent`), /codex-qa-official-model/);
     assert.equal(await evaluate(`document.querySelectorAll('.kpi')[3].querySelector('.kpi-value').textContent`), '77.8%');
     assert.equal(await evaluate(`document.querySelector('.methodology').open`), false);
-    assert.equal(await evaluate(`document.querySelectorAll('.kpi:not(.hero-kpi) .kpi-note').length`), 0);
+    assert.equal(await evaluate(`document.querySelectorAll('.kpi')[3].querySelector('.kpi-note').textContent`), '输入与缓存字段齐全');
     await capture('codex-official-details-qa.png');
     saveCodexFixture({ ...codexFixture, detailTotals: localTotals, detailsSource: 'local',
       officialDetails: { ...officialDetails, status: 'partial', totals: { ...officialTotals, totalTokens: 40 },

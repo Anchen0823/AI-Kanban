@@ -166,7 +166,7 @@ export class CodexAppServer {
     const outcome = await this.call<Record<string, unknown>>(
       'initialize',
       {
-        clientInfo: { name: 'ai-control-center', title: 'AI Control Center 只读探测', version: '0.3.0' },
+        clientInfo: { name: 'ai-control-center', title: 'AI Control Center 只读探测', version: '0.3.1' },
         capabilities: { experimentalApi: false },
       },
       startupTimeoutMs,

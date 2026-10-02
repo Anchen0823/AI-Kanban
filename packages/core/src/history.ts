@@ -10,6 +10,24 @@ export const HISTORY_TOKEN_FIELDS = ['inputTokens', 'outputTokens', 'cachedInput
 export type TokenField = typeof HISTORY_TOKEN_FIELDS[number];
 export type Coverage = 'complete' | 'partial' | 'unknown';
 export type TokenCoverage = Record<TokenField, Coverage>;
+/** Matched input/cache pairs only; record units are specific to each source. */
+export interface CacheInputSample {
+  inputTokens: number;
+  cachedInputTokens: number;
+  matchedRecords: number;
+  totalRecords: number;
+}
+export function collectCacheInputSample(rows: Partial<HistoryTokens>[]): CacheInputSample | undefined {
+  const result: CacheInputSample = { inputTokens: 0, cachedInputTokens: 0, matchedRecords: 0, totalRecords: rows.length };
+  for (const row of rows) {
+    const input = row.inputTokens, cached = row.cachedInputTokens;
+    if (input == null || cached == null || !Number.isSafeInteger(input) || !Number.isSafeInteger(cached)
+      || input < 0 || cached < 0 || cached > input) continue;
+    result.inputTokens += input; result.cachedInputTokens += cached; result.matchedRecords++;
+    if (!Number.isSafeInteger(result.inputTokens) || !Number.isSafeInteger(result.cachedInputTokens)) return undefined;
+  }
+  return result.matchedRecords ? result : undefined;
+}
 export function unknownCoverage(): TokenCoverage {
   return Object.fromEntries(HISTORY_TOKEN_FIELDS.map(key => [key, 'unknown'])) as TokenCoverage;
 }
@@ -25,11 +43,14 @@ export interface HistorySync {
   stale: boolean;
 }
 export interface HistorySnapshot {
+  /** Last successfully selected local export directory; only exposed in the user's real workspace. */
+  sourceDirectory?: string;
   status: 'not_scanned' | 'ok' | 'empty' | 'error';
   checkedAt?: string | null;
   totals: HistoryTokens;
   coverage?: TokenCoverage;
   detailCoverage?: TokenCoverage;
+  cacheInputSample?: CacheInputSample;
   sync?: HistorySync;
   sessionCount?: number | null;
   firstAt: string | null;
@@ -53,7 +74,7 @@ export interface HistoryTotalResponse {
   totalTokens: number | null; partial: boolean; sources: HistoryTotalSource[]; warnings: string[];
 }
 export interface ImportedHistoryView {
-  providers: { provider: string; totals: HistoryTokens; coverage?: TokenCoverage; firstAt: string | null; lastAt: string | null;
+  providers: { provider: string; totals: HistoryTokens; coverage?: TokenCoverage; cacheInputSample?: CacheInputSample; firstAt: string | null; lastAt: string | null;
     byDay: { date: string; totalTokens: number | null }[];
     byModel: { model: string | null; totalTokens: number | null }[] }[];
 }

@@ -1,6 +1,6 @@
 {
   "name": "@aicc/desktop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "AI Control Center Windows 桌面端",
   "author": "AI Control Center contributors",

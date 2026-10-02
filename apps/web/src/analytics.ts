@@ -1,4 +1,4 @@
-import type { HistoryTokens, TokenCoverage, HistorySync } from '@aicc/core';
+import type { CacheInputSample, HistoryTokens, TokenCoverage, HistorySync } from '@aicc/core';
 export type { HistoryTokens as TokenTotals, HistorySnapshot as LocalHistory, ImportedHistoryView as ImportedHistory, HistoryTotalResponse as TotalHistory } from '@aicc/core';
 import type { HistorySnapshot as LocalHistory, ImportedHistoryView as ImportedHistory, HistoryTotalResponse as TotalHistory } from '@aicc/core';
 type TokenTotals = HistoryTokens;
@@ -7,6 +7,7 @@ export interface SourceData {
   detailsSource?: 'official' | 'local'; officialDetails?: LocalHistory['officialDetails'];
   id: string; label: string; included: boolean; reason: string | null; total: number | null;
   coverage?: TokenCoverage; sync?: HistorySync;
+  cacheInputSample?: CacheInputSample;
   totals?: TokenTotals; days: { day: string; value: number | null }[];
   models: { name: string; value: number | null }[]; checkedAt?: string | null; warnings: string[];
 }
@@ -27,6 +28,7 @@ export function buildSources(total: TotalHistory, local: Record<string, LocalHis
     const provider = imported?.providers.find(p => `imported:${p.provider}` === source.id);
     return { ...source, label: LOCAL_SOURCES.find(([id]) => id === source.id)?.[1] ?? source.label.replace('已导入：', ''), total: source.totalTokens,
       coverage: history?.detailCoverage ?? history?.coverage ?? provider?.coverage, sync: history?.sync,
+      cacheInputSample: history?.cacheInputSample ?? provider?.cacheInputSample,
       totals: history?.detailTotals ?? history?.localTotals ?? history?.totals ?? provider?.totals, checkedAt: history?.checkedAt,
       detailsSource: history?.detailsSource, officialDetails: history?.officialDetails,
       statisticsSource: history?.statisticsSource, dailySource: history?.dailySource, officialMessage: history?.officialMessage,
@@ -75,4 +77,40 @@ export function cacheInputRate(sources: SourceData[]): number | null {
   const input = sumKnown(sources.map(s => s.totals!.inputTokens));
   const cached = sumKnown(sources.map(s => s.totals!.cachedInputTokens));
   return input !== null && input > 0 && cached !== null ? cached / input * 100 : null;
+}
+
+/** A partial ratio uses only matched pairs; it never mixes a partial numerator with the full denominator. */
+export function cacheInputSummary(sources: SourceData[]) {
+  const pairs: { input: number; cached: number }[] = [];
+  const details: string[] = [];
+  let partial = false;
+  for (const source of sources) {
+    const sample = source.cacheInputSample;
+    if (sample && Number.isSafeInteger(sample.inputTokens) && sample.inputTokens >= 0
+      && Number.isSafeInteger(sample.cachedInputTokens) && sample.cachedInputTokens >= 0 && sample.cachedInputTokens <= sample.inputTokens
+      && Number.isSafeInteger(sample.matchedRecords) && sample.matchedRecords > 0
+      && Number.isSafeInteger(sample.totalRecords) && sample.totalRecords >= sample.matchedRecords) {
+      pairs.push({ input: sample.inputTokens, cached: sample.cachedInputTokens });
+      partial ||= sample.matchedRecords < sample.totalRecords;
+      details.push(`${source.label}：${sample.matchedRecords} / ${sample.totalRecords} 个统计分组字段齐全`);
+    } else if (cacheInputRate([source]) !== null || (source.coverage?.inputTokens === 'complete'
+      && source.coverage.cachedInputTokens === 'complete' && source.totals?.inputTokens === 0 && source.totals.cachedInputTokens === 0)) {
+      pairs.push({ input: source.totals!.inputTokens!, cached: source.totals!.cachedInputTokens! });
+      details.push(`${source.label}：保留的输入与缓存字段齐全`);
+    } else {
+      partial = true;
+      details.push(`${source.label}：缺少可核对的输入与缓存字段，未参与占比`);
+    }
+  }
+  const input = sumKnown(pairs.map(pair => pair.input)), cached = sumKnown(pairs.map(pair => pair.cached));
+  const rate = input !== null && input > 0 && cached !== null ? cached / input * 100 : null;
+  const knownInput = sumKnown(sources.map(source => source.totals?.inputTokens));
+  const covered = input !== null && knownInput !== null && knownInput > 0 && input <= knownInput ? input / knownInput * 100 : null;
+  // Round down so incomplete coverage never appears as 100% after formatting.
+  const coverageText = covered === null ? '' : ` · 覆盖 ${Math.floor(covered * 10) / 10}% 已知输入`;
+  return { rate, input, cached, partial,
+    note: rate === null ? '暂无字段齐全的可用输入记录' : partial ? `部分记录${coverageText}` : '输入与缓存字段齐全',
+    explanation: ['仅对输入与缓存字段齐全且数值有效的记录计算；不代表完整账户历史。', ...details,
+      `参与计算：${formatNumber(cached)} / ${formatNumber(input)} Token；已知输入共 ${formatNumber(knownInput)} Token。`].join('\n'),
+  };
 }

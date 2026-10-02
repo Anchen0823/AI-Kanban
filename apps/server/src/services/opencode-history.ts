@@ -1,4 +1,4 @@
-import { tokenCoverage, type HistoryTokens } from '@aicc/core';
+import { collectCacheInputSample, tokenCoverage, type HistoryTokens } from '@aicc/core';
 import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
@@ -90,6 +90,7 @@ export async function scanOpencodeHistory(options: OpencodeScanOptions = {}): Pr
       } else warn('部分记录缺少有效时间，已归入未知日期。');
     }
     result.coverage = tokenCoverage(coverageRows, result.totals);
+    result.cacheInputSample = collectCacheInputSample(coverageRows);
     result.sessionCount = sessions.size;
     result.byModel = [...models].map(([model, b]) => ({ model, totals: b.totals, sessionCount: b.sessions.size }));
     result.byDay = [...days].map(([day, b]) => ({ day, totals: b.totals, sessionCount: b.sessions.size }));

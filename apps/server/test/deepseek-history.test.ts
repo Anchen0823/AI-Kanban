@@ -145,6 +145,27 @@ test('ZIP 条目数超过安全上限时在解压阶段拒绝', async () => {
   }
 });
 
+test('DeepSeek partial ratio pairs buckets within the same time, model and identity without treating missing cache as zero', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'aicc-deepseek-pairs-'));
+  try {
+    await writeFile(join(directory, 'amount.csv'), [AMOUNT_HEADER,
+      amount('input_cache_hit_tokens', '0.1', '30'),
+      amount('input_cache_hit_tokens', '0.2', '10'),
+      amount('input_cache_miss_tokens', '0.3', '60'),
+      amount('output_tokens', '0.4', '5'),
+      amount('input_cache_miss_tokens', '0.3', '900', 'other-key'),
+      amount('output_tokens', '0.4', '2', 'other-key'),
+    ].join('\n'));
+    const result = await scanDeepseekHistory({ directory });
+    assert.equal(result.totals.inputTokens, 1000);
+    assert.equal(result.totals.cachedInputTokens, 40);
+    assert.equal(result.coverage?.inputTokens, 'partial');
+    assert.equal(result.coverage?.cachedInputTokens, 'partial');
+    assert.deepEqual(result.cacheInputSample, { inputTokens: 100, cachedInputTokens: 40, matchedRecords: 1, totalRecords: 2 });
+    assert.doesNotMatch(JSON.stringify(result), /other-key|secret-key|private-user/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test('成功扫描只缓存脱敏聚合，后续失败不覆盖最近成功结果', async () => {
   const h = await createHarness();
   const directory = await fixtureDirectory();
@@ -154,14 +175,20 @@ test('成功扫描只缓存脱敏聚合，后续失败不覆盖最近成功结�
     const stored = getSetting(h.app.db, 'history.deepseek') ?? '';
     assert.doesNotMatch(stored, /private-user|secret-key|private-name|aicc-deepseek-history/);
     assert.deepEqual(getDeepseekHistory(h.app.ctx), result);
+    assert.equal(result.sourceDirectory, directory);
+    assert.equal(getSetting(h.app.db, 'history.deepseek.directory'), directory);
+    const reused = await runDeepseekHistory(h.app.ctx);
+    assert.equal(reused.totals.totalTokens, result.totals.totalTokens);
 
     const failed = await runDeepseekHistory(h.app.ctx, { directory: join(directory, 'missing') });
     assert.equal(failed.status, 'error');
     const retained = getDeepseekHistory(h.app.ctx);
     assert.deepEqual(retained.totals, result.totals);
-    assert.equal(retained.checkedAt, result.checkedAt);
+    assert.equal(retained.checkedAt, reused.checkedAt);
     assert.equal(retained.sync?.stale, true);
     assert.equal(retained.sync?.lastAttempt?.status, 'error');
+    assert.equal(retained.sourceDirectory, directory);
+    assert.equal(getSetting(h.app.db, 'history.deepseek.directory'), directory);
   } finally {
     await rm(directory, { recursive: true, force: true });
     h.close();
@@ -210,6 +237,10 @@ test('DeepSeek 历史路由要求用户会话、拒绝 demo 并设置 no-store',
     assert.equal(get.statusCode, 200);
     assert.equal(get.headers['cache-control'], 'no-store');
     assert.equal(get.json().totals.totalTokens, 38);
+    assert.equal(get.json().sourceDirectory, directory);
+    const reuse = await server.inject({ method: 'POST', url: '/api/history/deepseek', headers: { authorization: 'Test user' }, payload: {} });
+    assert.equal(reuse.statusCode, 200);
+    assert.equal(reuse.json().totals.totalTokens, 38);
   } finally {
     await server.close();
     await rm(directory, { recursive: true, force: true });

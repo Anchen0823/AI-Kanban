@@ -1,4 +1,4 @@
-import { tokenCoverage } from '@aicc/core';
+import { collectCacheInputSample, tokenCoverage } from '@aicc/core';
 import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
 /** Read-only WorkBuddy project JSONL adapter. Never persists conversation content. */
 import { createReadStream } from 'node:fs';
@@ -119,7 +119,9 @@ export async function scanWorkbuddyHistory(options: WorkbuddyScanOptions = {}): 
   result.sessionCount = sessions.size;
   result.byModel = [...models].map(([model, b]) => ({ model, totals: b.totals, sessionCount: b.sessions.size }));
   result.byDay = [...days].sort(([a], [b]) => a.localeCompare(b)).map(([day, b]) => ({ day, totals: b.totals, sessionCount: b.sessions.size }));
-  result.coverage = tokenCoverage([...events].filter(([id]) => !conflicts.has(id)).map(([, event]) => event.totals), result.totals);
+  const coverageRows = [...events].filter(([id]) => !conflicts.has(id)).map(([, event]) => event.totals);
+  result.coverage = tokenCoverage(coverageRows, result.totals);
+  result.cacheInputSample = collectCacheInputSample(coverageRows);
   result.status = readFailed || (malformed && !sessions.size) ? 'error' : sessions.size ? 'ok' : 'empty';
   result.message = sessions.size ? `已扫描 ${files.length} 个 WorkBuddy 日志文件，按消息 ID 去重汇总。` : '未找到有效的 WorkBuddy 用量记录，未按 0 Token 处理。';
   if (result.status === 'error') result.message = '历史读取不完整；保留上次成功结果，请修复文件或访问权限后重试。';

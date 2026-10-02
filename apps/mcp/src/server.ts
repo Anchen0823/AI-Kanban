@@ -33,7 +33,7 @@ import {
 import { findTool, toolList } from './tools.js';
 
 export const SERVER_NAME = 'ai-control-center';
-export const SERVER_VERSION = '0.3.0';
+export const SERVER_VERSION = '0.3.1';
 
 /**
  * §11.3 的客户端行为约定，写成服务端下发的 instructions。

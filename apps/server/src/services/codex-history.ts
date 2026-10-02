@@ -1,4 +1,4 @@
-import { tokenCoverage, type HistoryTokens, type HistorySnapshot } from '@aicc/core';
+import { collectCacheInputSample, tokenCoverage, type HistoryTokens, type HistorySnapshot } from '@aicc/core';
 import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
 /**
  * 从本机 Codex rollout 历史提取 token 汇总。
@@ -481,6 +481,7 @@ export async function scanCodexHistory(options: CodexHistoryScanOptions = {}): P
     status: 'ok',
     checkedAt,
     coverage: tokenCoverage(coverageRows, totals),
+    cacheInputSample: collectCacheInputSample(coverageRows),
     totals,
     sessionCount: sessions.size,
     firstAt,
@@ -561,6 +562,7 @@ async function refreshCodexHistory(ctx: ServiceContext, options: CodexHistorySca
     ...(official.details ? { officialDetails: official.details } : {}),
     coverage: useTotal ? tokenCoverage([{ totalTokens: official.summary!.lifetimeTokens }], { ...EMPTY_TOTALS(), totalTokens: official.summary!.lifetimeTokens }) : local.coverage,
     detailCoverage: useDetails ? tokenCoverage([official.details!.totals], official.details!.totals) : local.coverage,
+    cacheInputSample: useDetails ? collectCacheInputSample([official.details!.totals]) : local.cacheInputSample,
     detailsSource: useDetails ? 'official' : 'local',
     detailTotals: useDetails ? official.details!.totals : local.totals,
     localTotals: local.totals,

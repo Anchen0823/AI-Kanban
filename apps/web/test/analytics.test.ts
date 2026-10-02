@@ -1,7 +1,7 @@
 import { tokenCoverage } from '@aicc/core';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregate, cacheInputRate, buildSources, calendarDays, sumKnown, type SourceData } from '../src/analytics.js';
+import { aggregate, cacheInputRate, cacheInputSummary, buildSources, calendarDays, sumKnown, type SourceData } from '../src/analytics.js';
 const source = (id: string, included: boolean): SourceData => ({ id, label: id, included, reason: null, total: 12,
   days: [{ day: '2026-09-01', value: 12 }], models: [{ name: 'model', value: 12 }], warnings: [] });
 test('all-source charts exclude overlapping sources but standalone selection permits them', () => {
@@ -55,6 +55,26 @@ test('imported provider names bind to authoritative source ids', () => {
   assert.equal(rows[0]?.models[0]?.name, '未记录模型');
 });
 
+
+test('partial cache ratio weights matched inputs only and states coverage instead of diluting missing cache with full inputs', () => {
+  const deepseek: SourceData = { ...source('DeepSeek', true),
+    totals: { inputTokens: 1000, cachedInputTokens: 40, outputTokens: 7, totalTokens: 1007 },
+    cacheInputSample: { inputTokens: 100, cachedInputTokens: 40, matchedRecords: 1, totalRecords: 2 } };
+  const other: SourceData = { ...source('other', true),
+    totals: { inputTokens: 300, cachedInputTokens: 240, outputTokens: 0, totalTokens: 300 },
+    cacheInputSample: { inputTokens: 300, cachedInputTokens: 240, matchedRecords: 1, totalRecords: 1 } };
+  const result = cacheInputSummary([deepseek, other]);
+  assert.equal(result.rate, 70); // (40 + 240) / (100 + 300), not 280 / 1300 or averaged rates.
+  assert.equal(result.partial, true);
+  assert.match(result.note, /部分记录.*30.7% 已知输入/);
+  assert.match(result.explanation, /DeepSeek：1 \/ 2/);
+  assert.equal(cacheInputSummary([deepseek]).rate, 40);
+  assert.equal(cacheInputSummary([source('legacy', true)]).rate, null);
+  const zero = { ...other, cacheInputSample: { inputTokens: 10, cachedInputTokens: 0, matchedRecords: 1, totalRecords: 1 } };
+  assert.equal(cacheInputSummary([zero]).rate, 0);
+  const overflow = { ...other, cacheInputSample: { inputTokens: Number.MAX_SAFE_INTEGER, cachedInputTokens: 1, matchedRecords: 1, totalRecords: 1 } };
+  assert.equal(cacheInputSummary([overflow, other]).rate, null);
+});
 
 test('cache ratio requires matching complete coverage and never clamps invalid values', () => {
   const make = (input: number | null, cached: number | null): SourceData => {
