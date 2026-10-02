@@ -247,3 +247,73 @@ test('DeepSeek 历史路由要求用户会话、拒绝 demo 并设置 no-store',
     h.close();
   }
 });
+
+test('unusable DeepSeek exports preserve the last snapshot and remembered directory', async (t) => {
+  const fixtures = [
+    { name: 'unrecognized CSV', file: 'other.csv', content: strToU8('date,value\n2025-01-02,99') },
+    { name: 'only invalid rows', file: 'amount.csv', content: strToU8(`${AMOUNT_HEADER}\n${amount('output_tokens', '1', 'invalid')}`) },
+    { name: 'ZIP with no supported CSV', file: 'export.zip', content: zipSync({ 'readme.txt': strToU8('no data') }) },
+  ];
+  for (const fixture of fixtures) {
+    await t.test(fixture.name, async () => {
+      const h = await createHarness();
+      const directory = await fixtureDirectory();
+      const invalidDirectory = await mkdtemp(join(tmpdir(), 'aicc-deepseek-unusable-'));
+      try {
+        const before = await runDeepseekHistory(h.app.ctx, { directory });
+        await writeFile(join(invalidDirectory, fixture.file), fixture.content);
+        const attempted = await runDeepseekHistory(h.app.ctx, { directory: invalidDirectory });
+        assert.equal(attempted.status, 'error');
+        const retained = getDeepseekHistory(h.app.ctx);
+        assert.deepEqual(retained.totals, before.totals);
+        assert.equal(retained.checkedAt, before.checkedAt);
+        assert.equal(retained.sourceDirectory, directory);
+        assert.equal(retained.sync?.stale, true);
+        assert.equal(retained.sync?.lastAttempt?.status, 'error');
+        const reused = await runDeepseekHistory(h.app.ctx);
+        assert.equal(reused.totals.totalTokens, before.totals.totalTokens);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+        await rm(invalidDirectory, { recursive: true, force: true });
+        h.close();
+      }
+    });
+  }
+});
+
+test('genuinely empty directories and recognized header-only exports remain successful empty scans', async () => {
+  const h = await createHarness();
+  const directory = await fixtureDirectory();
+  const emptyDirectory = await mkdtemp(join(tmpdir(), 'aicc-deepseek-empty-'));
+  try {
+    await runDeepseekHistory(h.app.ctx, { directory });
+    const empty = await runDeepseekHistory(h.app.ctx, { directory: emptyDirectory });
+    assert.equal(empty.status, 'empty');
+    assert.equal(empty.sourceDirectory, emptyDirectory);
+    assert.equal(getDeepseekHistory(h.app.ctx).totals.totalTokens, null);
+    await writeFile(join(emptyDirectory, 'amount.csv'), AMOUNT_HEADER);
+    const headerOnly = await runDeepseekHistory(h.app.ctx);
+    assert.equal(headerOnly.status, 'empty');
+    assert.equal(headerOnly.sync?.stale, false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    await rm(emptyDirectory, { recursive: true, force: true });
+    h.close();
+  }
+});
+
+test('invalid or reversed filename date ranges cannot abort valid DeepSeek usage', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'aicc-deepseek-range-'));
+  try {
+    await writeFile(join(directory, 'amount-2025-01-01_2025-99-99.csv'), `${AMOUNT_HEADER}\n${amount('output_tokens', '1', '5')}`);
+    await writeFile(join(directory, 'amount-2025-02-01_2025-02-28.csv'), AMOUNT_HEADER);
+    await writeFile(join(directory, 'amount-2025-02-29_2025-03-01.csv'), AMOUNT_HEADER);
+    await writeFile(join(directory, 'amount-2025-04-30_2025-04-01.csv'), AMOUNT_HEADER);
+    const result = await scanDeepseekHistory({ directory });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.totals.totalTokens, 5);
+    assert.match(result.message, /2025-02-01 至 2025-02-28/);
+    assert.ok(result.warnings.some(warning => warning.includes('日期范围无效')));
+    assert.doesNotMatch(result.message, /2025-99-99|2025-02-29|2025-04/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

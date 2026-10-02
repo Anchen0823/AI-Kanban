@@ -9,6 +9,8 @@
 
 /** 解析出的原始表格。 */
 export interface ParsedTable {
+  /** Structural data loss, separate from informational warnings. */
+  integrityIssues: Array<'unclosed_quote' | 'duplicate_header' | 'column_count'>;
   delimiter: string;
   headers: string[];
   rows: Record<string, string>[];
@@ -39,6 +41,7 @@ function detectDelimiter(firstLine: string): string {
  */
 export function parseCsv(text: string, forcedDelimiter?: string): ParsedTable {
   const warnings: string[] = [];
+  const integrityIssues: ParsedTable['integrityIssues'] = [];
   let input = text;
   if (input.charCodeAt(0) === 0xfeff) input = input.slice(1); // 去 BOM
 
@@ -107,13 +110,14 @@ export function parseCsv(text: string, forcedDelimiter?: string): ParsedTable {
   }
 
   if (inQuotes) {
+    integrityIssues.push('unclosed_quote');
     warnings.push('文件结尾处存在未闭合的引号，最后一行的解析结果可能不完整。');
   }
   if (field.length > 0 || record.length > 0) pushRecord();
 
   const nonEmpty = records.filter((r) => r.some((c) => c.trim().length > 0));
   if (nonEmpty.length === 0) {
-    return { delimiter, headers: [], rows: [], warnings: [...warnings, '文件里没有任何数据行'] };
+    return { delimiter, integrityIssues, headers: [], rows: [], warnings: [...warnings, '文件里没有任何数据行'] };
   }
 
   const headerRow = (nonEmpty[0] as string[]).map((h) => h.trim());
@@ -123,6 +127,7 @@ export function parseCsv(text: string, forcedDelimiter?: string): ParsedTable {
     const count = seen.get(name) ?? 0;
     seen.set(name, count + 1);
     if (count > 0) {
+      if (!integrityIssues.includes('duplicate_header')) integrityIssues.push('duplicate_header');
       warnings.push(`表头出现重复列名 ${JSON.stringify(name)}，第 ${count + 1} 次出现被重命名为 ${name}__${count + 1}`);
       return `${name}__${count + 1}`;
     }
@@ -132,6 +137,7 @@ export function parseCsv(text: string, forcedDelimiter?: string): ParsedTable {
   const rows: Record<string, string>[] = [];
   for (let r = 1; r < nonEmpty.length; r += 1) {
     const cells = nonEmpty[r] as string[];
+    if (cells.length !== headers.length && !integrityIssues.includes('column_count')) integrityIssues.push('column_count');
     if (cells.length > headers.length) {
       warnings.push(`第 ${r + 1} 行列数（${cells.length}）多于表头（${headers.length}），多出的部分被忽略。`);
     }
@@ -142,7 +148,7 @@ export function parseCsv(text: string, forcedDelimiter?: string): ParsedTable {
     rows.push(obj);
   }
 
-  return { delimiter, headers, rows, warnings };
+  return { delimiter, integrityIssues, headers, rows, warnings };
 }
 
 /**

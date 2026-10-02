@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { unzipSync } from 'fflate';
+import { tx } from '../db/database.js';
 import { getSetting, setSetting } from '../db/repos/system.js';
 import { parseCsv } from '../imports/parse.js';
 import type { ServiceContext } from '../service-context.js';
@@ -143,6 +144,8 @@ function hashIdentity(userId: string, apiKey = ''): string {
 }
 
 function timestamp(value: string): string | null {
+  const day = dayFrom(value);
+  if (!day || !validDay(day)) return null;
   const milliseconds = Date.parse(value);
   return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : null;
 }
@@ -240,9 +243,21 @@ function totals(value: Accumulator, warnings: string[]): DeepseekHistoryTotals {
   };
 }
 
-function rangeFromName(name: string): SourceRange | null {
+function validDay(day: string): boolean {
+  const milliseconds = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString().slice(0, 10) === day;
+}
+
+function rangeFromName(name: string, warnings: string[]): SourceRange | null {
   const match = /(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})(?:\.zip|\.csv)$/i.exec(name);
-  return match ? { start: match[1] as string, end: match[2] as string } : null;
+  if (!match) return null;
+  const start = match[1] as string;
+  const end = match[2] as string;
+  if (!validDay(start) || !validDay(end) || end < start) {
+    addWarning(warnings, '部分导出文件名的日期范围无效，已忽略该范围；有效数据行仍会参与统计。');
+    return null;
+  }
+  return { start, end };
 }
 
 function rangeSummary(ranges: SourceRange[], warnings: string[]): string {
@@ -252,9 +267,8 @@ function rangeSummary(ranges: SourceRange[], warnings: string[]): string {
   let gaps = 0;
   let furthestEnd = unique[0]?.end as string;
   for (const range of unique.slice(1)) {
-    const nextDay = new Date(`${furthestEnd}T00:00:00Z`);
-    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-    if (range.start > nextDay.toISOString().slice(0, 10)) gaps += 1;
+    const nextDay = Date.parse(`${furthestEnd}T00:00:00Z`) + 86_400_000;
+    if (Date.parse(`${range.start}T00:00:00Z`) > nextDay) gaps += 1;
     if (range.end > furthestEnd) furthestEnd = range.end;
   }
   if (gaps > 0) addWarning(warnings, `检测到 ${gaps} 个导出日期范围空档；缺失范围没有按 0 用量处理。`);
@@ -271,13 +285,17 @@ function parseCsvRows(
   amountRows: Map<string, AmountRow>,
   costRows: Map<string, CostRow>,
   warnings: string[],
-  state: { rows: number },
+  state: { rows: number; unsupportedContent: boolean; invalidRows: boolean },
 ): void {
   const parsed = parseCsv(text);
+  if (parsed.integrityIssues.length > 0) {
+    throw new ScanError('CSV 存在未闭合引号、重复表头或列数不匹配；本次未更新统计，请修复导出文件后重试。');
+  }
   if (parsed.warnings.length > 0) addWarning(warnings, '部分 CSV 存在格式提示；已继续解析可识别的数据行。');
   const amountFile = validHeaders(parsed.headers, AMOUNT_HEADERS);
   const costFile = validHeaders(parsed.headers, COST_HEADERS);
   if (!amountFile && !costFile) {
+    state.unsupportedContent = true;
     addWarning(warnings, '发现表头不符合已确认 DeepSeek 导出格式的 CSV，已跳过。');
     return;
   }
@@ -292,7 +310,8 @@ function parseCsvRows(
     const endAt = timestamp(endRaw);
     const day = dayFrom(startRaw);
     const model = row.model?.trim() ?? '';
-    if (!startAt || !endAt || !day || endAt < startAt || !model) {
+    if (!startAt || !endAt || !day || Date.parse(endAt) < Date.parse(startAt) || !model) {
+      state.invalidRows = true;
       addWarning(warnings, '部分导出行缺少有效时间或模型，已跳过。');
       continue;
     }
@@ -307,7 +326,8 @@ function parseCsvRows(
       const rawPrice = row.price?.trim() ?? '';
       // 官方 request_count 行没有计价，price 留空；它仍是稳定 bucket 的一部分。
       const parsedPrice = type === 'request_count' && rawPrice === '' ? null : parseDecimal(rawPrice);
-      if (amount === null || (type !== 'request_count' && parsedPrice === null)) {
+      if (amount === null || (parsedPrice === null && !(type === 'request_count' && rawPrice === ''))) {
+        state.invalidRows = true;
         addWarning(warnings, '部分用量行含无效的 amount 或 price，已跳过。');
         continue;
       }
@@ -327,6 +347,7 @@ function parseCsvRows(
     const currency = row.currency?.trim().toUpperCase() ?? '';
     const wallet = row.wallet_type?.trim() ?? '';
     if (!cost || !currency || !wallet) {
+      state.invalidRows = true;
       addWarning(warnings, '部分消费行缺少有效 cost、currency 或 wallet_type，已跳过。');
       continue;
     }
@@ -457,17 +478,18 @@ export async function scanDeepseekHistory(options: DeepseekHistoryScanOptions): 
 
   const amountRows = new Map<string, AmountRow>();
   const costRows = new Map<string, CostRow>();
-  const state = { rows: 0 };
+  const state = { rows: 0, unsupportedContent: false, invalidRows: false };
   const limits = { uncompressed: 0 };
   const ranges: SourceRange[] = [];
   let fileCount = 0;
   try {
     for (const entry of candidates) {
       const extension = entry.name.toLowerCase().endsWith('.zip') ? '.zip' : '.csv';
-      const range = rangeFromName(entry.name);
+      const range = rangeFromName(entry.name, warnings);
       if (range) ranges.push(range);
       const contents = await csvContents(join(directory, entry.name), extension, limits);
       fileCount += 1;
+      if (contents.length === 0) state.unsupportedContent = true;
       for (const content of contents) parseCsvRows(content, amountRows, costRows, warnings, state);
     }
   } catch (error) {
@@ -475,8 +497,24 @@ export async function scanDeepseekHistory(options: DeepseekHistoryScanOptions): 
     return emptyResponse(message, 'error', checkedAt, fileCount, warnings);
   }
 
+  // Reject the whole replacement on damaged or unrecognized input. Missing
+  // buckets, unknown future types and documented duplicate handling are distinct.
+  if (state.invalidRows || state.unsupportedContent) {
+    return emptyResponse(
+      '导出包含无效数据行或无法识别的文件；本次未更新统计，保留上次成功结果和目录。请修复后重试。',
+      'error', checkedAt, fileCount, warnings,
+    );
+  }
   const coverage = rangeSummary(ranges, warnings);
   if (amountRows.size === 0 && costRows.size === 0) {
+    // A readable but unusable export is a failed import, not evidence of empty
+    // history. Preserve the last successful snapshot and selected directory.
+    if (state.rows > 0) {
+      return emptyResponse(
+        '所选导出文件未包含可识别的 DeepSeek 历史数据，请检查文件格式和数据行。',
+        'error', checkedAt, fileCount, warnings,
+      );
+    }
     return emptyResponse(
       `已扫描 ${fileCount} 个直接子文件，但没有找到可用的 DeepSeek 历史行。${coverage}；结果并非完整历史。`,
       'empty', checkedAt, fileCount, warnings,
@@ -552,8 +590,10 @@ export async function runDeepseekHistory(
 ): Promise<DeepseekHistoryResponse> {
   const directory = options.directory?.trim() ?? getSetting(ctx.db, DIRECTORY_KEY) ?? '';
   const result = await scanDeepseekHistory({ directory, now: () => ctx.now() });
-  const saved = saveHistoryAttempt(ctx, SETTING_KEY, SCHEMA_VERSION, result, directory, true, true);
-  // Remember the successful selection separately from the de-identified statistics.
-  if (result.status === 'ok' || result.status === 'empty') setSetting(ctx.db, DIRECTORY_KEY, resolve(directory));
-  return { ...saved, sourceDirectory: getSetting(ctx.db, DIRECTORY_KEY) };
+  return tx(ctx.db, () => {
+    const saved = saveHistoryAttempt(ctx, SETTING_KEY, SCHEMA_VERSION, result, directory, true, true);
+    // Snapshot, sync metadata and remembered selection must commit together.
+    if (result.status === 'ok' || result.status === 'empty') setSetting(ctx.db, DIRECTORY_KEY, resolve(directory));
+    return { ...saved, sourceDirectory: getSetting(ctx.db, DIRECTORY_KEY) };
+  });
 }
