@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { api, getWorkspace, setWorkspace, type SessionInfo, type Workspace } from './api.js';
+import { api, authenticationRestored, onAuthenticationLost, getWorkspace, setWorkspace, type SessionInfo, type Workspace } from './api.js';
 import { Alert, Badge, Modal } from './ui.js';
 import { Telemetry } from './pages/Telemetry.js';
 export type PageKey = 'overview' | 'usage' | 'memory' | 'projects' | 'bridge' | 'settings';
@@ -33,11 +33,16 @@ export function App(): ReactNode {
       const next = await api.get<SessionInfo>('/api/session');
       setSession(next); setSessionError(null);
       if (next.authenticated) {
+        authenticationRestored();
         const demo = await api.get<{ hasDemoData: boolean }>('/api/demo/status');
         setHasDemo(demo.hasDemoData);
       }
     } catch (error) { setSessionError(error instanceof Error ? error.message : String(error)); setSession({ authenticated: false }); }
   }, []);
+  useEffect(() => onAuthenticationLost(() => {
+    setSession({ authenticated: false });
+    setSessionError('会话已过期，请重新配对。');
+  }), []);
   useEffect(() => { void loadSession(); }, [loadSession]);
   useEffect(() => { const change = () => setFullscreen(!!document.fullscreenElement); document.addEventListener('fullscreenchange', change); return () => document.removeEventListener('fullscreenchange', change); }, []);
   useEffect(() => {
@@ -48,6 +53,9 @@ export function App(): ReactNode {
   useEffect(() => { document.documentElement.style.scrollBehavior = motion ? 'smooth' : 'auto'; }, [motion]);
   function switchWorkspace(next: Workspace) { setWorkspace(next); setWorkspaceState(next); reload(); }
   if (!session) return <div className="gate faint">正在连接本机观测站…</div>;
+  if (!session.authenticated && new URLSearchParams(window.location.search).get('desktop') === '1') {
+    return <div className="gate"><div className="gate-card card" role="alert"><h1>会话已过期</h1><p>请从「应用 → 重新启动」恢复连接。按 Alt 可显示菜单，重启不会删除已保存的用量。</p></div></div>;
+  }
   if (!session.authenticated) return <PairGate hint={session.hint} error={sessionError} onPaired={loadSession} />;
   return <div className="aqua-app" data-motion={motion ? 'on' : 'off'} id="overview">
     <div className="ambient-field" aria-hidden="true"><i /><i /><i /></div>

@@ -18,8 +18,22 @@ const port = probe.address().port;
 await new Promise(resolveClose => probe.close(resolveClose));
 const executable = process.argv[2] ? resolve(process.argv[2]) : require('electron');
 const args = [...(process.argv[2] ? [] : ['apps/desktop']), `--remote-debugging-port=${port}`];
-const env = { ...process.env, AICC_NODE_EXECUTABLE: process.execPath,
-  AICC_DESKTOP_PROFILE: profile, AICC_DATA_DIR: join(profile, 'data') };
+const env = { ...process.env, AICC_DESKTOP_PROFILE: profile, AICC_DATA_DIR: join(profile, 'data') };
+if (process.argv[2]) { delete env.AICC_NODE_EXECUTABLE; delete env.NODE_PATH; }
+else env.AICC_NODE_EXECUTABLE = process.execPath;
+// Startup sync must never inspect developer accounts during fixture verification.
+if (process.env.AICC_VERIFY_OFFICIAL_SYNC !== '1') {
+  env.AICC_CODEX_COMMAND = join(profile, 'no-such-codex.exe');
+  env.CODEX_HOME = join(profile, 'codex');
+}
+env.WORKBUDDY_HOME = join(profile, 'workbuddy');
+env.MINIMAX_HOME = join(profile, 'minimax');
+env.OPENCODE_DB = join(profile, 'opencode.db');
+// Match Explorer's stale PATH instead of inheriting the terminal's new Codex bin.
+if (process.env.AICC_VERIFY_OFFICIAL_SYNC === '1') {
+  const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') ?? 'PATH';
+  env[pathKey] = (env[pathKey] ?? '').split(';').filter(dir => !/OpenAI[\\/]Codex[\\/]bin/i.test(dir)).join(';');
+}
 delete env.ELECTRON_RUN_AS_NODE;
 const child = spawn(executable, args, { env, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
 const exited = once(child, 'exit');
@@ -56,7 +70,7 @@ try {
   function command(method, params = {}) {
     return new Promise((resolveResult, reject) => {
       const request = ++id;
-      const timeout = setTimeout(() => { pending.delete(request); reject(new Error(`${method} timed out`)); }, 10000);
+      const timeout = setTimeout(() => { pending.delete(request); reject(new Error(`${method} timed out: ${JSON.stringify(params).slice(0, 300)}\n${stderr.slice(-2000)}`)); }, 30000);
       pending.set(request, result => { clearTimeout(timeout); result.error ? reject(new Error(result.error.message)) : resolveResult(result.result); });
       socket.send(JSON.stringify({ id: request, method, params }));
     });
@@ -65,6 +79,13 @@ try {
     const result = await command('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
     if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
     return result.result.value;
+  }
+  async function reloadPage() {
+    const previous = await evaluate('performance.timeOrigin');
+    // Navigation can destroy Runtime.evaluate's reply context, particularly in
+    // the portable launcher. Page.reload acknowledges before navigating.
+    await command('Page.reload');
+    await waitFor(() => evaluate(`performance.timeOrigin !== ${previous} && document.readyState === 'complete'`));
   }
   await command('Input.setIgnoreInputEvents', {ignore:true});
   await waitFor(() => evaluate(`document.body.innerText.includes('用量统计') && document.querySelectorAll('button').length > 3`));
@@ -96,6 +117,9 @@ try {
   assert.equal(await evaluate(`fetch('/api/history/total').then(r => r.json()).then(r => r.totalTokens)`), null, 'Fresh test profile must contain no usage');
   assert.equal(await evaluate(`!!document.querySelector('.control-deck, select[aria-label="统计来源"]')`),false);
   assert.equal(await evaluate(`!!document.querySelector('.observatory-nav .nav-sync-button')`),true);
+  await waitFor(() => evaluate(`['codex','workbuddy','opencode','minimax'].every(id => document.querySelector('[data-source="'+id+'"] .source-actions button')?.disabled === false)`));
+  const startupAttempts = await evaluate(`fetch('/api/history/dashboard').then(r => r.json()).then(d => Object.fromEntries(Object.entries(d.local).filter(([id]) => id !== 'deepseek').map(([id,s]) => [id,s.sync.lastAttempt?.at])))`);
+  assert.equal(Object.values(startupAttempts).filter(Boolean).length,4);
   await capture('aqua-empty.png');
   // A real isolated database is populated via public APIs; these are QA fixtures, never user data.
   async function post(path, body) {
@@ -117,7 +141,7 @@ try {
     const result = await post('/api/imports', { kind:'usage_csv',fileName:provider+'-qa.csv',accountId:account.account.id,content:rows.join('\n') });
     assert.equal(result.acceptedRows,81);
   }
-  await evaluate('location.reload()');
+  await reloadPage();
   try {
     await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.getAttribute('title') === ${JSON.stringify(expectedTotal.toLocaleString('zh-CN'))}`), 15000);
   } catch (error) {
@@ -125,6 +149,7 @@ try {
     await capture('aqua-failure.png');
     throw error;
   }
+  assert.deepEqual(await evaluate(`fetch('/api/history/dashboard').then(r => r.json()).then(d => Object.fromEntries(Object.entries(d.local).filter(([id]) => id !== 'deepseek').map(([id,s]) => [id,s.sync.lastAttempt?.at])))`), startupAttempts, 'Reload must not trigger startup sync again');
   assert.equal(await evaluate(`document.querySelectorAll('.donut-legend button').length`),3);
   assert.equal(await evaluate(`document.querySelectorAll('.model-rank').length`),9);
   assert.match(await evaluate(`document.querySelector('.trend-meta strong').textContent`), /^[\d,]+$/);
@@ -173,7 +198,7 @@ try {
   assert.equal(await evaluate(`document.querySelector('.hero-kpi .kpi-value').textContent`),expectedTotal.toLocaleString('zh-CN'));
   assert.equal(runtimeErrors.length,0,JSON.stringify(runtimeErrors));
   await post('/api/demo/seed',{});
-  await evaluate('location.reload()');
+  await reloadPage();
   await waitFor(() => evaluate(`!!document.querySelector('.workspace-switch')`));
   await clickLabel('示例数据');
   await waitFor(() => evaluate(`document.querySelector('.telemetry')?.getAttribute('aria-busy') === 'false'`));
@@ -197,14 +222,123 @@ try {
   await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.getAttribute('title') === ${JSON.stringify((expectedTotal-deepseekImport+38).toLocaleString('zh-CN'))}`));
   assert.equal(await evaluate(`fetch('/api/history/total').then(r => r.json()).then(r => r.sources.find(s => s.id === 'imported:DeepSeek').included)`), false);
   assert.equal(await evaluate(`document.body.innerText.includes('同步完成，已重新读取可用统计。')`),false);
+  await evaluate(`document.querySelector('.methodology').open = true; document.querySelector('tr[data-source="imported:DeepSeek"] button').click()`);
+  await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.title === ${JSON.stringify(deepseekImport.toLocaleString('zh-CN'))}`));
+  assert.match(await evaluate(`document.querySelector('.source-selection').textContent`), /重叠/);
+  await clickLabel('查看全部');
+  await evaluate(`document.querySelector('.methodology').open = false`);
+  console.log('PASS: excluded sources can be inspected without changing the authoritative all-source total.');
   console.log('PASS: DeepSeek UI collection refreshes the dashboard and excludes overlapping generic imports.');
+  if (process.env.AICC_VERIFY_OFFICIAL_SYNC === '1') {
+    // Exercise the actual UI sync button twice, not just stored fixture rendering.
+    // The profile is isolated; only Codex's own read-only account interface is used.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      assert.equal(await evaluate(`(() => { const tile = [...document.querySelectorAll('.source-tile')].find(t => t.querySelector('.source-tile-top strong')?.textContent === 'Codex'); const b = tile?.querySelector('button'); if (!b || b.disabled) return false; b.click(); return true; })()`), true);
+      await waitFor(() => evaluate(`(() => { const tile = [...document.querySelectorAll('.source-tile')].find(t => t.querySelector('.source-tile-top strong')?.textContent === 'Codex'); return tile?.querySelector('button')?.disabled === false; })()`), 60000);
+      const history = await evaluate(`fetch('/api/history/codex').then(r => r.json())`);
+      assert.equal(history.statisticsSource, 'official', history.officialMessage);
+      assert.equal(history.dailySource, 'official');
+      assert.ok(Number.isSafeInteger(history.totals.totalTokens) && history.totals.totalTokens > 0);
+      assert.equal(await evaluate(`fetch('/api/history/total').then(r => r.json()).then(r => r.sources.find(s => s.id === 'codex').totalTokens)`), history.totals.totalTokens);
+      console.log(`PASS: real UI sync ${attempt + 1} with Explorer-style PATH returns official total ${history.totals.totalTokens}.`);
+    }
+    await evaluate(`(() => { const b = [...document.querySelectorAll('.donut-legend button')].find(b => b.textContent.includes('Codex')); b.click(); window.scrollTo(0,0); })()`);
+    await waitFor(() => evaluate(`document.querySelector('.methodology tbody')?.textContent.includes('Codex（官方统计）')`));
+    await capture('codex-official-real-sync.png');
+  }
+  // Official Codex account fixtures are written only to the isolated QA profile.
+  // Verify the official total is never reconstructed from local components.
+  const { DatabaseSync } = require('node:sqlite');
+  const qaDb = new DatabaseSync(join(profile, 'data', 'ai-control-center.sqlite'));
+  const localTotals = { inputTokens: 10, outputTokens: 2, cachedInputTokens: 8, reasoningOutputTokens: 1, totalTokens: 12 };
+  const unknownTotals = { inputTokens: null, outputTokens: null, cachedInputTokens: null, reasoningOutputTokens: null, totalTokens: 100 };
+  const codexFixture = { schemaVersion: 2, status: 'ok', checkedAt: '2026-10-01T00:00:00.000Z',
+    statisticsSource: 'official', dailySource: 'official', totals: unknownTotals, localTotals,
+    officialMessage: '已读取 Codex 官方账户统计。', sessionCount: 1,
+    firstAt: '2026-09-24T00:00:00.000Z', lastAt: '2026-09-24T00:00:00.000Z',
+    byDay: [{ day: '2026-09-24', totals: { ...unknownTotals, totalTokens: 50 }, sessionCount: 0 }],
+    byModel: [{ model: 'codex-qa-local-model', totals: localTotals, sessionCount: 1 }], warnings: [], message: 'QA official fixture',
+  };
+  function saveCodexFixture(value) {
+    qaDb.prepare('INSERT INTO app_settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at')
+      .run('history.codex', JSON.stringify(value), new Date().toISOString());
+  }
+  async function selectCodexFixture() {
+    await reloadPage();
+    await waitFor(() => evaluate(`document.querySelector('.telemetry')?.getAttribute('aria-busy') === 'false'`));
+    assert.equal(await evaluate(`(() => { const b = [...document.querySelectorAll('.donut-legend button')].find(b => b.textContent.includes('Codex')); if (!b) return false; b.click(); return true; })()`), true);
+  }
+  try {
+    saveCodexFixture(codexFixture);
+    await selectCodexFixture();
+    await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.title === '100'`));
+    assert.equal(await evaluate(`document.querySelectorAll('.kpi:not(.hero-kpi) .kpi-note').length`), 0);
+    assert.equal(await evaluate(`document.querySelectorAll('.kpi')[1].querySelector('.kpi-value').title`), '10');
+    assert.equal(await evaluate(`document.querySelectorAll('.kpi')[3].querySelector('.kpi-value').textContent`), '—', 'Legacy coverage must not invent a cache ratio');
+    assert.doesNotMatch(await evaluate(`document.querySelector('.chart-foot').textContent`), /官方统计|本机日志/);
+    assert.equal(await evaluate(`document.querySelector('.model-panel .panel-note') === null`), true);
+    assert.match(await evaluate(`document.querySelector('.methodology tbody').textContent`), /Codex（官方统计）/);
+    await capture('codex-official-qa.png');
+    const officialTotals = { inputTokens: 90, outputTokens: 10, cachedInputTokens: 70, reasoningOutputTokens: null, totalTokens: 100 };
+    const officialDetails = { status: 'complete', totals: officialTotals, checkedThreads: 2, availableThreads: 2,
+      message: '官方会话明细已与官方累计核对一致，分项与模型排行采用官方估算数据。' };
+    saveCodexFixture({ ...codexFixture, detailTotals: officialTotals, detailsSource: 'official', officialDetails,
+      detailCoverage: { inputTokens:'complete', outputTokens:'complete', cachedInputTokens:'complete', reasoningOutputTokens:'unknown', totalTokens:'complete' },
+      byModel: [{ model: 'codex-qa-official-model', totals: officialTotals, sessionCount: 2 }] });
+    await selectCodexFixture();
+    await waitFor(() => evaluate(`document.querySelectorAll('.kpi')[1].querySelector('.kpi-value').title === '90'`));
+    assert.match(await evaluate(`document.querySelector('.model-panel').textContent`), /codex-qa-official-model/);
+    assert.equal(await evaluate(`document.querySelectorAll('.kpi')[3].querySelector('.kpi-value').textContent`), '77.8%');
+    assert.equal(await evaluate(`document.querySelector('.methodology').open`), false);
+    assert.equal(await evaluate(`document.querySelectorAll('.kpi:not(.hero-kpi) .kpi-note').length`), 0);
+    await capture('codex-official-details-qa.png');
+    saveCodexFixture({ ...codexFixture, detailTotals: localTotals, detailsSource: 'local',
+      officialDetails: { ...officialDetails, status: 'partial', totals: { ...officialTotals, totalTokens: 40 },
+        message: '官方返回部分会话的估算明细，尚未覆盖官方累计；分项与模型排行继续采用本机日志。' } });
+    await selectCodexFixture();
+    await waitFor(() => evaluate(`document.querySelectorAll('.kpi')[1].querySelector('.kpi-value').title === '10'`));
+    assert.equal(await evaluate(`document.querySelector('.hero-kpi .kpi-value').title`), '100');
+    assert.match(await evaluate(`document.querySelector('.methodology').textContent`), /已返回明细合计 40 Token/);
+    assert.match(await evaluate(`document.querySelector('.model-panel').textContent`), /codex-qa-local-model/);
+    saveCodexFixture({ ...codexFixture, statisticsSource: 'local', dailySource: 'local', totals: localTotals,
+      officialMessage: '官方统计需要 Codex CLI 的 ChatGPT 登录。请运行 codex login 后重新同步；当前回退到本机日志。' });
+    await selectCodexFixture();
+    await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.title === '12'`));
+    assert.match(await evaluate(`document.querySelector('.telemetry-notice').textContent`), /codex login/);
+    assert.match(await evaluate(`document.querySelector('.methodology tbody').textContent`), /Codex（本机日志）/);
+    await capture('codex-fallback-qa.png');
+    console.log('PASS: official Codex totals/days, reconciled official details, partial-detail fallback, clean main UI and login fallback (isolated QA fixtures).');
+  } finally { qaDb.close(); }
+  // Simulate an expired HTTP session at the renderer boundary, without changing production auth TTL.
+  await evaluate(`(() => { const real = window.fetch.bind(window); window.fetch = (url, options) => String(url).startsWith('/api/history/') ? Promise.resolve(new Response(JSON.stringify({error:{message:'会话已过期'}}), {status:401,headers:{'content-type':'application/json'}})) : real(url, options); document.querySelector('.nav-sync-button').click(); })()`);
+  await waitFor(() => evaluate(`document.body.innerText.includes('应用 → 重新启动') && !document.querySelector('.telemetry')`));
+  console.log('PASS: expired desktop session shows recovery and unmounts the dashboard.');
+  await evaluate(`history.replaceState(null, '', '/')`);
+  await reloadPage();
+  await waitFor(() => evaluate(`document.querySelector('.telemetry')?.getAttribute('aria-busy') === 'false' && document.querySelector('.nav-sync-button')?.disabled === false`));
+  await evaluate(`(() => { window.__qaFetch = window.fetch.bind(window); window.fetch = (url, options) => String(url).startsWith('/api/history/') ? Promise.resolve(new Response(JSON.stringify({error:{message:'会话已过期'}}),{status:401,headers:{'content-type':'application/json'}})) : window.__qaFetch(url, options); document.querySelector('.nav-sync-button').click(); })()`);
+  await waitFor(() => evaluate(`!!document.querySelector('input[placeholder="例如 K7M2QP4R"]') && !document.querySelector('.telemetry')`));
+  // The pairing HTTP contract is covered by real backend tests; simulate its success here to exercise the UI recovery transition.
+  await evaluate(`(() => { window.fetch = (url, options) => String(url) === '/api/session/pair' ? Promise.resolve(new Response('{}',{status:200,headers:{'content-type':'application/json'}})) : window.__qaFetch(url, options); const input = document.querySelector('input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'TESTCODE'); input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+  await clickLabel('配对');
+  await waitFor(() => evaluate(`document.querySelector('.telemetry')?.getAttribute('aria-busy') === 'false' && document.querySelector('.nav-sync-button')?.disabled === false`));
+  assert.equal(runtimeErrors.length,0,JSON.stringify(runtimeErrors));
+  console.log('PASS: browser session recovery returns to pairing and resumes sync after authentication.');
   console.log('PASS: aqua single-screen UI, real API fixture totals, trend ranges and chart switching, model views, source filtering, full numbers, reduced motion, DeepSeek collection, source coverage, 1000px/390px layouts, demo isolation, zero renderer errors.');
-  await evaluate('window.close()');
+  // Let the debugging protocol acknowledge the command before the window and
+  // its transport disappear; immediate close can drop the RPC reply in builds.
+  await evaluate('setTimeout(() => window.close(), 200); true');
   await Promise.race([exited, delay(10000).then(() => { throw new Error('Desktop did not exit'); })]);
   await assert.rejects(fetch(origin));
   console.log('PASS: real desktop auto-login, navigation, renderer isolation, anonymous rejection, screenshot, window close and backend cleanup.');
   console.log(join(output, 'aqua-dashboard.png'));
-} finally {
+ } finally {
+  // The portable launcher has its own process; killing only that launcher can
+  // leave Electron alive. Ask Chromium to close first, even after a failed check.
+  if (child.exitCode === null && socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ id: 2147483647, method: 'Browser.close' }));
+    await Promise.race([exited, delay(3000)]);
+  }
   socket?.close();
   if (child.exitCode === null) child.kill();
 }

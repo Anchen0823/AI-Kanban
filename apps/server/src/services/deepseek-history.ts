@@ -1,10 +1,12 @@
+import { tokenCoverage, type HistorySnapshot } from '@aicc/core';
+import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
 /** DeepSeek 控制台导出 ZIP/CSV 的脱敏历史汇总。 */
 
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { unzipSync } from 'fflate';
-import { getSetting, setSetting } from '../db/repos/system.js';
+import { getSetting } from '../db/repos/system.js';
 import { parseCsv } from '../imports/parse.js';
 import type { ServiceContext } from '../service-context.js';
 
@@ -38,7 +40,7 @@ export interface DeepseekHistoryTotals {
   requestCount: number | null;
 }
 
-export interface DeepseekHistoryResponse {
+export interface DeepseekHistoryResponse extends HistorySnapshot {
   status: 'not_scanned' | 'ok' | 'empty' | 'error';
   checkedAt: string | null;
   totals: DeepseekHistoryTotals;
@@ -421,7 +423,7 @@ function stored(ctx: ServiceContext): DeepseekHistoryResponse | null {
 }
 
 export function getDeepseekHistory(ctx: ServiceContext): DeepseekHistoryResponse {
-  return stored(ctx) ?? emptyResponse('尚未扫描 DeepSeek 控制台导出。');
+  return withHistorySync(ctx, SETTING_KEY, stored(ctx) ?? emptyResponse('尚未扫描 DeepSeek 控制台导出。'));
 }
 
 /** 只读扫描指定目录；不会保存原始身份、API Key、文件名或目录。 */
@@ -480,11 +482,17 @@ export async function scanDeepseekHistory(options: DeepseekHistoryScanOptions): 
   }
 
   const aggregate = accumulator();
+  const coverageGroups = new Map<string, Accumulator>();
   const models = new Map<string, Accumulator>();
   const days = new Map<string, Accumulator>();
   let firstAt: string | null = null;
   let lastAt: string | null = null;
-  for (const row of amountRows.values()) {
+  for (const [identity, row] of amountRows) {
+    if (row.type !== 'request_count') {
+      const groupKey = identity.split('\0').slice(0, 5).join('\0');
+      const group = coverageGroups.get(groupKey) ?? accumulator();
+      addAmount(group, row); coverageGroups.set(groupKey, group);
+    }
     addAmount(aggregate, row);
     const model = models.get(row.model) ?? accumulator();
     addAmount(model, row);
@@ -503,7 +511,14 @@ export async function scanDeepseekHistory(options: DeepseekHistoryScanOptions): 
     if (lastAt === null || row.endAt > lastAt) lastAt = row.endAt;
   }
 
+  const fieldCoverage = tokenCoverage([...coverageGroups.values()].map(group => ({
+    inputTokens: group.seenCacheHit && group.seenCacheMiss ? safeNumber(group.cacheHit + group.cacheMiss, warnings) : null,
+    cachedInputTokens: group.seenCacheHit ? safeNumber(group.cacheHit, warnings) : null,
+    outputTokens: group.seenOutput ? safeNumber(group.output, warnings) : null,
+    totalTokens: group.seenCacheHit && group.seenCacheMiss && group.seenOutput ? safeNumber(group.cacheHit + group.cacheMiss + group.output, warnings) : null,
+  })), totals(aggregate, warnings));
   return {
+    coverage: fieldCoverage,
     status: 'ok',
     checkedAt,
     totals: totals(aggregate, warnings),
@@ -532,10 +547,5 @@ export async function runDeepseekHistory(
   options: DeepseekHistoryScanOptions,
 ): Promise<DeepseekHistoryResponse> {
   const result = await scanDeepseekHistory({ ...options, now: () => ctx.now() });
-  // 扫描失败不覆盖最近一次成功/空结果，避免一次错误路径让已有历史统计永久消失。
-  if (result.status !== 'error') {
-    const storedResult: StoredDeepseekHistory = { schemaVersion: SCHEMA_VERSION, ...result };
-    setSetting(ctx.db, SETTING_KEY, JSON.stringify(storedResult));
-  }
-  return result;
+  return saveHistoryAttempt(ctx, SETTING_KEY, SCHEMA_VERSION, result, options.directory, true, true);
 }

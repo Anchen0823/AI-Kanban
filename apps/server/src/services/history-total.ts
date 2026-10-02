@@ -1,3 +1,5 @@
+import type { HistoryTotalSource, HistoryTotalResponse } from '@aicc/core';
+export type { HistoryTotalSource, HistoryTotalResponse } from '@aicc/core';
 /** 可扩展的跨来源历史 token 总览。 */
 
 import type { WorkspaceScope } from '../db/repos/workspace.js';
@@ -9,13 +11,7 @@ import { getMinimaxHistory } from './minimax-history.js';
 import { getOpencodeHistory } from './opencode-history.js';
 import { importedHistory } from './history-imported.js';
 
-export interface HistoryTotalSource {
-  id: string;
-  label: string;
-  totalTokens: number | null;
-  included: boolean;
-  reason: string | null;
-}
+
 
 /**
  * 每个新来源 adapter 只需产出这一结构；aggregateHistoryTotal 不读取数据库，便于独立验证。
@@ -25,12 +21,7 @@ export interface HistoryTotalCandidate extends HistoryTotalSource {
   warnings?: string[];
 }
 
-export interface HistoryTotalResponse {
-  totalTokens: number | null;
-  partial: boolean;
-  sources: HistoryTotalSource[];
-  warnings: string[];
-}
+
 
 function addWarning(warnings: string[], warning: string): void {
   if (!warnings.includes(warning)) warnings.push(warning);
@@ -145,12 +136,12 @@ export function historyTotal(
     codexKnown = codex.status === 'ok' && codex.totals.totalTokens !== null;
     candidates.push({
       id: 'codex',
-      label: 'Codex 本机历史',
+      label: codex.statisticsSource === 'official' ? 'Codex 官方账户统计' : 'Codex 本机历史',
       totalTokens: codex.totals.totalTokens,
       included: codexKnown,
       reason: codexKnown ? null : '尚无可用的 Codex 专用历史总量',
-      partial: codex.warnings.length > 0 || !codexKnown,
-      warnings: codex.warnings,
+      partial: codex.statisticsSource !== 'official' && (codex.warnings.length > 0 || !codexKnown),
+      warnings: codex.statisticsSource === 'official' ? [] : [...codex.warnings, ...(codex.officialMessage ? [codex.officialMessage] : [])],
     });
 
     const minimax = getMinimaxHistory(ctx);

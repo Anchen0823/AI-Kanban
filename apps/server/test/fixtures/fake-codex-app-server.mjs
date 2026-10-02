@@ -82,7 +82,50 @@ if (process.argv.includes('app-server')) {
         continue;
       }
 
+      if (method === 'thread/list' && MODE.startsWith('usage-details-')) {
+        send({ id, result: { data: (params.archived ? ['fixture-thread-a', 'fixture-thread-b'] : ['fixture-thread-a', 'fixture-thread-a'])
+          .map(id => ({ id, preview: 'secret-fixture', name: 'secret-fixture' })), nextCursor: null } });
+        continue;
+      }
       if (method === 'account/usage/read') {
+        if (MODE.startsWith('usage-details-')) {
+          const total = params.threadId === 'fixture-thread-a' ? 60 : 40;
+          send({ id, result: params.threadId ? { summary: {}, threadUsage: MODE === 'usage-details-null' ? null : {
+            threadId: params.threadId, estimatedUsageCreditsMicros: 100, groups: [{
+              model: 'official-model', inputTokens: MODE === 'usage-details-missing' ? null : total - 5,
+              outputTokens: 5, cachedInputTokens: 20, totalTokens: total, reasoningEffort: 'high',
+              estimatedUsageCreditsMicros: 100, extra: 'secret-fixture',
+            }] } } : { summary: { lifetimeTokens: MODE === 'usage-details-partial' ? 200 : 100 }, dailyUsageBuckets: null } });
+          continue;
+        }
+        if (MODE === 'usage-ok') {
+          send({ id, result: { summary: { lifetimeTokens: 2810000000, peakDailyTokens: 420000000 },
+            dailyUsageBuckets: [{ startDate: '2026-09-24', tokens: 420000000 }] } });
+          continue;
+        }
+        if (MODE === 'usage-auth') {
+          send({ id, error: { code: -32603, message: 'codex account authentication required to read token usage bearer secret-fixture' } });
+          continue;
+        }
+        if (MODE === 'usage-empty') {
+          send({ id, result: { summary: { lifetimeTokens: null }, dailyUsageBuckets: null } });
+          continue;
+        }
+        if (MODE === 'usage-timeout') continue;
+        if (MODE === 'usage-ok') {
+          send({ id, result: { summary: { lifetimeTokens: 2810000000, peakDailyTokens: 420000000 },
+            dailyUsageBuckets: [{ startDate: '2026-09-24', tokens: 420000000 }] } });
+          continue;
+        }
+        if (MODE === 'usage-auth') {
+          send({ id, error: { code: -32603, message: 'codex account authentication required to read token usage bearer secret-fixture' } });
+          continue;
+        }
+        if (MODE === 'usage-empty') {
+          send({ id, result: { summary: { lifetimeTokens: null }, dailyUsageBuckets: null } });
+          continue;
+        }
+        if (MODE === 'usage-timeout') continue;
         // 在真实 0.130.0 上就是这个形状：方法不在枚举里，报错同时列出全部合法方法。
         send({
           jsonrpc: '2.0',

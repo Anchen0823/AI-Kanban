@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { getSetting, setSetting } from '../src/db/repos/system.js';
 import { getCodexHistory, runCodexHistory, scanCodexHistory } from '../src/services/codex-history.js';
 import { createHarness } from './helpers.js';
+import { normalizeCodexAccountUsage, unavailableAccountUsage } from '../src/collectors/codex-account-usage.js';
 
 function line(type: string, payload: Record<string, unknown>, ordinal: number, timestamp: string): string {
   return JSON.stringify({ type, payload, ordinal, timestamp });
@@ -139,7 +140,8 @@ test('历史扫描缓存只保存聚合数字；未扫描时不把 token 报成 
     assert.equal(getCodexHistory(h.app.ctx).status, 'not_scanned');
     assert.equal(getCodexHistory(h.app.ctx).totals.totalTokens, null);
 
-    const scanned = await runCodexHistory(h.app.ctx, { codexHome: home });
+    const scanned = await runCodexHistory(h.app.ctx, { codexHome: home,
+      readOfficial: async () => unavailableAccountUsage('官方不可用，已回退到本机日志。') });
     assert.equal(scanned.status, 'ok');
     assert.deepEqual(getCodexHistory(h.app.ctx), scanned);
     const saved = getSetting(h.app.db, 'history.codex') ?? '';
@@ -149,6 +151,94 @@ test('历史扫描缓存只保存聚合数字；未扫描时不把 token 报成 
     h.close();
     await rm(home, { recursive: true, force: true });
   }
+});
+
+test('官方累计与每日快照优先；本机分项独立保存且不重复相加', async () => {
+  const home = await fixtureHome();
+  const h = await createHarness();
+  try {
+    for (const lifetimeTokens of [100, 12, 0]) {
+      const result = await runCodexHistory(h.app.ctx, { codexHome: home, readOfficial: async () => normalizeCodexAccountUsage({
+        summary: { lifetimeTokens },
+        dailyUsageBuckets: [{ startDate: '2026-09-18', tokens: 5 }, { startDate: '2026-09-18', tokens: 5 }],
+        secret: 'must-not-store',
+      }) });
+      assert.equal(result.statisticsSource, 'official');
+      assert.equal(result.dailySource, 'official');
+      assert.equal(result.totals.totalTokens, lifetimeTokens);
+      assert.equal(result.totals.inputTokens, null);
+      assert.equal(result.localTotals?.totalTokens, 54);
+      assert.equal(result.byModel.reduce((sum, row) => sum + (row.totals.totalTokens ?? 0), 0), 54);
+      assert.deepEqual(result.byDay.map(row => [row.day, row.totals.totalTokens]), [['2026-09-18', 5]]);
+      assert.deepEqual(getCodexHistory(h.app.ctx), result);
+      assert.doesNotMatch(getSetting(h.app.db, 'history.codex') ?? '', /must-not-store|session-a/);
+    }
+  } finally { h.close(); await rm(home, { recursive: true, force: true }); }
+});
+
+test('官方每日缺失时保留本机趋势；读取失败回退且不保留旧账号累计', async () => {
+  const home = await fixtureHome();
+  const h = await createHarness();
+  try {
+    const options = { codexHome: home, readOfficial: async () => normalizeCodexAccountUsage({ summary: { lifetimeTokens: 100 }, dailyUsageBuckets: null }) };
+    const official = await runCodexHistory(h.app.ctx, options);
+    assert.equal(official.statisticsSource, 'official');
+    assert.equal(official.dailySource, 'local');
+    assert.equal(official.byDay[0]?.totals.totalTokens, 20);
+    const fallback = await runCodexHistory(h.app.ctx, { codexHome: home, readOfficial: async () => { throw new Error('bearer must-not-store'); } });
+    assert.equal(fallback.statisticsSource, 'local');
+    assert.equal(fallback.totals.totalTokens, 54);
+    assert.match(fallback.officialMessage ?? '', /回退/);
+    assert.doesNotMatch(getSetting(h.app.db, 'history.codex') ?? '', /must-not-store/);
+    const dailyOnly = await runCodexHistory(h.app.ctx, { codexHome: home, readOfficial: async () => normalizeCodexAccountUsage({
+      summary: { lifetimeTokens: null }, dailyUsageBuckets: [{ startDate: '2026-09-18', tokens: 5 }],
+    }) });
+    assert.equal(dailyOnly.statisticsSource, 'local');
+    assert.equal(dailyOnly.dailySource, 'official');
+    assert.equal(dailyOnly.totals.totalTokens, 54);
+  } finally { h.close(); await rm(home, { recursive: true, force: true }); }
+});
+
+test('仅经核对的完整官方明细替换本机分项与模型，部分明细只独立保存', async () => {
+  const home = await fixtureHome();
+  const h = await createHarness();
+  const totals = { inputTokens: 90, outputTokens: 10, cachedInputTokens: 70, reasoningOutputTokens: null, totalTokens: 100 };
+  const details = { status: 'complete' as const, totals, byModel: [{ model: 'official-model', totals, sessionCount: 2 }],
+    checkedThreads: 2, availableThreads: 2, message: '官方明细已核对。' };
+  try {
+    const official = { ...normalizeCodexAccountUsage({ summary: { lifetimeTokens: 100 } }), details };
+    const result = await runCodexHistory(h.app.ctx, { codexHome: home, readOfficial: async () => official });
+    assert.equal(result.detailsSource, 'official');
+    assert.equal(result.detailTotals?.inputTokens, 90);
+    assert.equal(result.byModel[0]?.model, 'official-model');
+    assert.equal(result.localTotals?.totalTokens, 54);
+    for (const status of ['partial', 'complete'] as const) {
+      const incomplete = { ...official, details: { ...details, status, totals: { ...totals, totalTokens: 50 } } };
+      const fallback = await runCodexHistory(h.app.ctx, { codexHome: home, readOfficial: async () => incomplete });
+      assert.equal(fallback.detailsSource, 'local');
+      assert.equal(fallback.detailTotals?.totalTokens, 54);
+      assert.notEqual(fallback.byModel[0]?.model, 'official-model');
+      assert.equal(fallback.totals.totalTokens, 100);
+      assert.equal(fallback.officialDetails?.totals.totalTokens, 50);
+    }
+  } finally { h.close(); await rm(home, { recursive: true, force: true }); }
+});
+
+test('无本机日志仍能展示官方累计；并发同步只读取官方一次', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'aicc-official-empty-'));
+  const h = await createHarness();
+  let calls = 0;
+  try {
+    const options = { codexHome: home, readOfficial: async () => {
+      calls++; return normalizeCodexAccountUsage({ summary: { lifetimeTokens: 100 } });
+    } };
+    const [a, b] = await Promise.all([runCodexHistory(h.app.ctx, options), runCodexHistory(h.app.ctx, options)]);
+    assert.equal(calls, 1);
+    assert.deepEqual(a, b);
+    assert.equal(a.status, 'ok');
+    assert.equal(a.totals.totalTokens, 100);
+    assert.equal(a.localTotals?.totalTokens, null);
+  } finally { h.close(); await rm(home, { recursive: true, force: true }); }
 });
 
 test('没有本机历史时明确是 error/unknown，不把没有记录说成 0', async () => {

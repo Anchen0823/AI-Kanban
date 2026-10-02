@@ -1,8 +1,10 @@
+import { tokenCoverage, type HistoryTokens } from '@aicc/core';
+import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ServiceContext } from '../service-context.js';
-import { getSetting, setSetting } from '../db/repos/system.js';
+import { getSetting } from '../db/repos/system.js';
 import type { CodexHistoryResponse, CodexHistoryTotals } from './codex-history.js';
 
 const emptyTotals = (): CodexHistoryTotals => ({ inputTokens: null, outputTokens: null, cachedInputTokens: null, reasoningOutputTokens: null, totalTokens: null });
@@ -66,6 +68,7 @@ export async function scanOpencodeHistory(options: OpencodeScanOptions = {}): Pr
       let value = map.get(key); if (!value) { value = { totals: emptyTotals(), sessions: new Set() }; map.set(key, value); }
       add(value.totals, totals); value.sessions.add(session);
     };
+    const coverageRows: HistoryTokens[] = [];
     for (const row of rows) {
       const totals = normalizeOpencodeTokens(row);
       // OpenCode writes all-zero placeholders for unfinished/unknown steps without provider usage.
@@ -78,6 +81,7 @@ export async function scanOpencodeHistory(options: OpencodeScanOptions = {}): Pr
       const session = String(row.session_id), model = modelName(row.model);
       const ms = numeric(row.time_created);
       const at = ms !== null && ms <= 8.64e15 ? new Date(ms).toISOString() : null;
+      coverageRows.push(totals);
       add(result.totals, totals); sessions.add(session);
       bucket(models, model, session, totals); bucket(days, at?.slice(0, 10) ?? '未知日期', session, totals);
       if (at) {
@@ -85,10 +89,11 @@ export async function scanOpencodeHistory(options: OpencodeScanOptions = {}): Pr
         if (!result.lastAt || at > result.lastAt) result.lastAt = at;
       } else warn('部分记录缺少有效时间，已归入未知日期。');
     }
+    result.coverage = tokenCoverage(coverageRows, result.totals);
     result.sessionCount = sessions.size;
     result.byModel = [...models].map(([model, b]) => ({ model, totals: b.totals, sessionCount: b.sessions.size }));
     result.byDay = [...days].map(([day, b]) => ({ day, totals: b.totals, sessionCount: b.sessions.size }));
-    result.status = sessions.size ? 'ok' : 'empty';
+    result.status = !sessions.size && Number(corrupt?.n) > 0 ? 'error' : sessions.size ? 'ok' : 'empty';
     result.message = sessions.size ? `已同步 ${sessions.size} 个 OpenCode 会话的已知用量。` : '未找到已报告用量的 OpenCode 请求，用量未知。';
   } catch {
     result.status = 'error';
@@ -101,16 +106,16 @@ export function getOpencodeHistory(ctx: ServiceContext): CodexHistoryResponse {
   try {
     const value = JSON.parse(getSetting(ctx.db, 'history.opencode') ?? 'null');
     if (value?.schemaVersion === 1 && ['ok', 'empty', 'error'].includes(value.status) && value.totals && Array.isArray(value.byModel) && Array.isArray(value.byDay) && Array.isArray(value.warnings)) {
-      const { schemaVersion: _, ...response } = value; return response;
+      const { schemaVersion: _, ...response } = value; return withHistorySync(ctx, 'history.opencode', response);
     }
   } catch { /* no valid cache */ }
-  return blank();
+  return withHistorySync(ctx, 'history.opencode', blank());
 }
 const pending = new WeakMap<ServiceContext, Promise<CodexHistoryResponse>>();
 export function runOpencodeHistory(ctx: ServiceContext, options: OpencodeScanOptions = {}): Promise<CodexHistoryResponse> {
   const existing = pending.get(ctx); if (existing) return existing;
   const task = scanOpencodeHistory({ ...options, now: () => ctx.now() }).then(result => {
-    setSetting(ctx.db, 'history.opencode', JSON.stringify({ schemaVersion: 1, ...result })); return result;
+    return saveHistoryAttempt(ctx, 'history.opencode', 1, result, options.databasePath ?? process.env.OPENCODE_DB ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'opencode', 'opencode.db'));
   });
   pending.set(ctx, task);
   void task.finally(() => pending.delete(ctx)).catch(() => undefined);

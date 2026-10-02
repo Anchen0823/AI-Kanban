@@ -14,6 +14,39 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { delimiter, join } from 'node:path';
+import { homedir } from 'node:os';
+
+/** Explorer can have an older PATH than a terminal; discover the desktop install too. */
+export function resolveCodexCommand(
+  command: string,
+  searchPath = process.env.PATH ?? '',
+  desktopBin = join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'OpenAI', 'Codex', 'bin'),
+): string {
+  if (process.platform !== 'win32' || command !== 'codex') return command;
+  for (const directory of searchPath.split(delimiter)) {
+    if (!directory.trim()) continue;
+    const executable = join(directory.replace(/^"|"$/g, ''), 'codex.exe');
+    if (existsSync(executable)) return executable;
+  }
+  try {
+    const candidates = readdirSync(desktopBin, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && !entry.isSymbolicLink())
+      .map(entry => join(desktopBin, entry.name, 'codex.exe'))
+      .flatMap(executable => {
+        try {
+          const stat = statSync(executable);
+          return stat.isFile() ? [{ executable, modified: stat.mtimeMs }] : [];
+        } catch { return []; }
+      })
+      .sort((a, b) => b.modified - a.modified || a.executable.localeCompare(b.executable));
+    if (candidates[0]) return candidates[0].executable;
+  } catch {
+    // No desktop install: retain support for an npm/standalone CLI on PATH.
+  }
+  return command;
+}
 
 export interface CodexNotification {
   method: string;
@@ -62,6 +95,10 @@ export class CodexAppServer {
   private constructor(child: ChildProcess, timeoutMs: number) {
     this.child = child;
     this.timeoutMs = timeoutMs;
+    // Missing executables and early exits must settle reads, not crash the app.
+    child.on('error', () => this.close());
+    child.on('exit', () => this.close());
+    child.stdin?.on('error', () => this.close());
 
     child.stdout?.on('data', (chunk: Buffer) => {
       this.buffer += chunk.toString();
@@ -107,13 +144,13 @@ export class CodexAppServer {
   }
 
   static start(options: CodexAppServerOptions = {}): CodexAppServer {
-    const command = options.command ?? 'codex';
+    const command = options.spawnImpl ? options.command ?? 'codex' : resolveCodexCommand(options.command ?? 'codex');
     const spawnFn = options.spawnImpl ?? spawn;
     const child = spawnFn(command, ['app-server'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      // Windows 上 codex 是 .cmd 包装，必须走 shell 才能启动。
-      // 参数是常量字面量，没有注入面。测试注入的 spawnImpl 会自己关掉它。
-      shell: options.spawnImpl ? false : process.platform === 'win32',
+      // Native .exe launches directly; Windows .cmd wrappers need a shell.
+      shell: options.spawnImpl ? false : process.platform === 'win32' && !/\.exe$/i.test(command),
+      windowsHide: true,
       env: { ...process.env, ...(options.env ?? {}) },
     });
     return new CodexAppServer(child, options.timeoutMs ?? 12_000);
@@ -129,7 +166,7 @@ export class CodexAppServer {
     const outcome = await this.call<Record<string, unknown>>(
       'initialize',
       {
-        clientInfo: { name: 'ai-control-center', title: 'AI Control Center 只读探测', version: '0.1.0' },
+        clientInfo: { name: 'ai-control-center', title: 'AI Control Center 只读探测', version: '0.3.0' },
         capabilities: { experimentalApi: false },
       },
       startupTimeoutMs,
@@ -137,6 +174,7 @@ export class CodexAppServer {
     if (!outcome.ok) {
       throw new Error(`codex app-server 握手失败：${outcome.message}`);
     }
+    this.child.stdin?.write(`${JSON.stringify({ method: 'initialized' })}\n`);
     return { serverInfo: outcome.result, notifications: [...this.notifications] };
   }
 
@@ -209,10 +247,12 @@ export async function readCodexVersion(
   spawnImpl?: typeof spawn,
 ): Promise<string | null> {
   const spawnFn = spawnImpl ?? spawn;
+  const resolvedCommand = spawnImpl ? command : resolveCodexCommand(command);
   return new Promise((resolve) => {
-    const child = spawnFn(command, ['--version'], {
+    const child = spawnFn(resolvedCommand, ['--version'], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: spawnImpl ? false : process.platform === 'win32',
+      shell: spawnImpl ? false : process.platform === 'win32' && !/\.exe$/i.test(resolvedCommand),
+      windowsHide: true,
     });
     let out = '';
     const timer = setTimeout(() => {

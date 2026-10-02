@@ -53,14 +53,14 @@ test('WorkBuddy excludes conflicting IDs, invalid totals and non-assistant data'
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-test('WorkBuddy overflow stays unknown; missing home is empty rather than zero', async () => {
+test('WorkBuddy overflow stays unknown; missing home is an error rather than an empty scan', async () => {
   const home = await fixture([row('a', Number.MAX_SAFE_INTEGER, 0), row('b')]);
   try {
     const result = await scanWorkbuddyHistory({ workbuddyHome: home });
     assert.equal(result.totals.totalTokens, null);
     assert.ok(result.warnings.some(x => x.includes('安全整数')));
     const empty = await scanWorkbuddyHistory({ workbuddyHome: join(home, 'missing') });
-    assert.equal(empty.status, 'empty');
+    assert.equal(empty.status, 'error');
     assert.equal(empty.totals.totalTokens, null);
   } finally { await rm(home, { recursive: true, force: true }); }
 });

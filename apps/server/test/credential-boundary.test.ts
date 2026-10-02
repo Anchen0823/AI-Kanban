@@ -25,7 +25,7 @@ test('代理 scope 不授予工作台管理与历史数据的读取权限', asyn
     const headers = { authorization: `Bearer ${credential.body.token}` };
     const paths = [
       '/api/clients', '/api/accounts', '/api/subscriptions', '/api/projects', '/api/sessions',
-      '/api/overview', '/api/usage', '/api/charges', '/api/quota', `/api/quota/history?accountId=${account}&bucketId=test`, '/api/imports',
+      '/api/history/dashboard', '/api/overview', '/api/usage', '/api/charges', '/api/quota', `/api/quota/history?accountId=${account}&bucketId=test`, '/api/imports',
       '/api/integrations', '/api/workspace/summary', '/api/bridge/status',
       '/api/context-exports', `/api/context-exports/${exported.body.exportId}`,
       `/api/projects/${other}/context-preview`,

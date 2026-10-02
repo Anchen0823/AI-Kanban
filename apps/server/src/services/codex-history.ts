@@ -1,3 +1,5 @@
+import { tokenCoverage, type HistoryTokens, type HistorySnapshot } from '@aicc/core';
+import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
 /**
  * 从本机 Codex rollout 历史提取 token 汇总。
  *
@@ -12,7 +14,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { ServiceContext } from '../service-context.js';
-import { getSetting, setSetting } from '../db/repos/system.js';
+import { getSetting } from '../db/repos/system.js';
+import { readCodexAccountUsage, unavailableAccountUsage, type CodexAccountUsage, type CodexAccountSummary } from '../collectors/codex-account-usage.js';
+import type { CodexThreadDetails } from '../collectors/codex-thread-usage.js';
 
 const SETTING_KEY = 'history.codex';
 const SCHEMA_VERSION = 2;
@@ -20,13 +24,7 @@ const MAX_FILES = 10_000;
 const MAX_LINE_CHARS = 1_000_000;
 const MAX_WARNINGS = 40;
 
-export interface CodexHistoryTotals {
-  inputTokens: number | null;
-  cachedInputTokens: number | null;
-  outputTokens: number | null;
-  reasoningOutputTokens: number | null;
-  totalTokens: number | null;
-}
+export interface CodexHistoryTotals extends HistoryTokens { reasoningOutputTokens: number | null }
 
 export interface CodexHistoryBreakdown {
   model?: string;
@@ -35,7 +33,16 @@ export interface CodexHistoryBreakdown {
   sessionCount: number;
 }
 
-export interface CodexHistoryResponse {
+export interface CodexHistoryResponse extends HistorySnapshot {
+  statisticsSource?: 'official' | 'local';
+  dailySource?: 'official' | 'local';
+  officialSummary?: CodexAccountSummary | null;
+  officialMessage?: string;
+  detailsSource?: 'official' | 'local';
+  detailTotals?: CodexHistoryTotals;
+  officialDetails?: CodexThreadDetails;
+  /** Preserve the independently computed local fallback. */
+  localTotals?: CodexHistoryTotals;
   status: 'not_scanned' | 'ok' | 'empty' | 'error';
   checkedAt: string | null;
   totals: CodexHistoryTotals;
@@ -74,6 +81,7 @@ interface MutableBreakdown {
 }
 
 export interface CodexHistoryScanOptions {
+  readOfficial?: () => Promise<CodexAccountUsage>;
   /** 测试可注入目录；生产默认 CODEX_HOME，再回退到 ~/.codex。 */
   codexHome?: string;
   /** 防止意外目录树造成无限扫描；命中时会明确返回警告。 */
@@ -340,12 +348,16 @@ export async function scanCodexHistory(options: CodexHistoryScanOptions = {}): P
   const warnings: string[] = [];
   const sessions = new Map<string, SessionData>();
   let files = 0;
+  let readableRoots = 0;
+  let readFailed = false;
   const maxFiles = options.maxFiles ?? MAX_FILES;
 
   for (const root of roots) {
     try {
       await access(root);
-    } catch {
+      readableRoots++;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') readFailed = true;
       continue;
     }
     try {
@@ -353,6 +365,7 @@ export async function scanCodexHistory(options: CodexHistoryScanOptions = {}): P
         try {
           await scanFile(path, sessions, warnings);
         } catch {
+          readFailed = true;
           addWarning(warnings, '部分历史文件无法读取，已跳过；其余文件仍继续扫描。');
         }
         files += 1;
@@ -362,14 +375,16 @@ export async function scanCodexHistory(options: CodexHistoryScanOptions = {}): P
         }
       }
     } catch {
+      readFailed = true;
       addWarning(warnings, '部分历史目录无法读取，已跳过；结果只覆盖可读取文件。');
     }
     if (files >= maxFiles) break;
   }
 
+  if (readFailed) return { ...noHistory('本机历史文件或目录读取失败；请检查访问权限后重试。', 'error'), checkedAt, warnings };
   if (files === 0) {
     return {
-      ...noHistory('未找到本机 Codex rollout 历史；没有把它当作 0 token。', 'error'),
+      ...noHistory('未找到本机 Codex rollout 历史；没有把它当作 0 token。', readableRoots > 0 ? 'empty' : 'error'),
       checkedAt,
       warnings,
     };
@@ -381,6 +396,7 @@ export async function scanCodexHistory(options: CodexHistoryScanOptions = {}): P
   let firstAt: string | null = null;
   let lastAt: string | null = null;
   let records = 0;
+  const coverageRows: Partial<HistoryTokens>[] = [];
 
   for (const [sessionId, session] of sessions) {
     const inheritance = inheritedBaseline(session, sessions, warnings);
@@ -427,6 +443,7 @@ export async function scanCodexHistory(options: CodexHistoryScanOptions = {}): P
         addWarning(warnings, '部分 token 分项在总计数未重置时被上游向下修正；已使用上游差分保持总量关系，分项历史可能被修订。');
       }
 
+      coverageRows.push(delta);
       addDelta(totals, delta, warnings);
       const model = event.model ?? '未记录模型';
       const modelBucket = breakdown(models, model);
@@ -463,6 +480,7 @@ export async function scanCodexHistory(options: CodexHistoryScanOptions = {}): P
   return {
     status: 'ok',
     checkedAt,
+    coverage: tokenCoverage(coverageRows, totals),
     totals,
     sessionCount: sessions.size,
     firstAt,
@@ -497,20 +515,62 @@ function stored(ctx: ServiceContext): CodexHistoryResponse | null {
 }
 
 export function getCodexHistory(ctx: ServiceContext): CodexHistoryResponse {
-  return stored(ctx) ?? noHistory('尚未扫描本机 Codex 历史。扫描只保存汇总数字，不保存聊天正文。');
+  return withHistorySync(ctx, SETTING_KEY, stored(ctx) ?? noHistory('尚未扫描本机 Codex 历史。扫描只保存汇总数字，不保存聊天正文。'));
 }
 
 export function runCodexHistory(ctx: ServiceContext, options: CodexHistoryScanOptions = {}): Promise<CodexHistoryResponse> {
   const pending = inFlight.get(ctx);
   if (pending) return pending;
-  const task = scanCodexHistory({ ...options, now: () => ctx.now() }).then((result) => {
-    const storedResult: StoredCodexHistory = { schemaVersion: SCHEMA_VERSION, ...result };
-    setSetting(ctx.db, SETTING_KEY, JSON.stringify(storedResult));
-    return result;
+  const task = refreshCodexHistory(ctx, options).then((result) => {
+    const keepLocal = result.statisticsSource === 'local' && stored(ctx)?.statisticsSource === 'local';
+    return saveHistoryAttempt(ctx, SETTING_KEY, SCHEMA_VERSION, result, options.codexHome ?? process.env.CODEX_HOME ?? join(homedir(), '.codex'), keepLocal);
   });
   inFlight.set(ctx, task);
   void task.finally(() => {
     if (inFlight.get(ctx) === task) inFlight.delete(ctx);
   }).catch(() => undefined);
   return task;
+}
+
+async function refreshCodexHistory(ctx: ServiceContext, options: CodexHistoryScanOptions): Promise<CodexHistoryResponse> {
+  // Read the account summary first. Local logs only supply fallback and details.
+  let official: CodexAccountUsage;
+  try {
+    official = await (options.readOfficial ?? (() => readCodexAccountUsage({
+      command: ctx.config.codexCommand,
+      ...(options.codexHome ? { env: { CODEX_HOME: options.codexHome } } : {}),
+    })))();
+  } catch {
+    official = unavailableAccountUsage('暂时无法读取官方统计，已回退到本机日志。');
+  }
+  const local = await scanCodexHistory({ ...options, now: () => ctx.now() }).catch(() => ({
+    ...noHistory('本机日志读取失败；本机明细暂不可用。', 'error'),
+    checkedAt: new Date(ctx.now()).toISOString(),
+  }));
+  const useTotal = official.status === 'ok' && official.summary?.lifetimeTokens != null;
+  const useDays = official.status === 'ok' && official.dailyUsageBuckets !== null;
+  const useDetails = useTotal && official.details?.status === 'complete'
+    && official.details.totals.totalTokens === official.summary!.lifetimeTokens;
+  return {
+    ...local,
+    status: useTotal || useDays ? 'ok' : local.status,
+    statisticsSource: useTotal ? 'official' : 'local',
+    dailySource: useDays ? 'official' : 'local',
+    officialSummary: official.summary,
+    officialMessage: official.message,
+    ...(official.details ? { officialDetails: official.details } : {}),
+    coverage: useTotal ? tokenCoverage([{ totalTokens: official.summary!.lifetimeTokens }], { ...EMPTY_TOTALS(), totalTokens: official.summary!.lifetimeTokens }) : local.coverage,
+    detailCoverage: useDetails ? tokenCoverage([official.details!.totals], official.details!.totals) : local.coverage,
+    detailsSource: useDetails ? 'official' : 'local',
+    detailTotals: useDetails ? official.details!.totals : local.totals,
+    localTotals: local.totals,
+    byModel: useDetails ? official.details!.byModel : local.byModel,
+    totals: useTotal ? { ...EMPTY_TOTALS(), totalTokens: official.summary!.lifetimeTokens } : local.totals,
+    byDay: useDays ? official.dailyUsageBuckets!.map(row => ({
+      day: row.startDate, totals: { ...EMPTY_TOTALS(), totalTokens: row.tokens }, sessionCount: 0,
+    })) : local.byDay,
+    message: useTotal
+      ? `累计 Token 来自 Codex 官方账户统计；${useDays ? '每日趋势来自官方统计' : '官方未提供每日趋势，趋势来自本机日志'}。${official.details?.message ?? '输入、输出、缓存及模型明细来自本机日志，可能与官方累计不同。'}`
+      : `${official.message}${official.status === 'ok' ? '官方累计未知，累计采用本机日志。' : ''}${local.message}`,
+  };
 }

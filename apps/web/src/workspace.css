@@ -114,3 +114,10 @@ html { scroll-behavior:smooth; scroll-padding-top:96px; } body { font-size:13px;
 @media(max-width:700px) { .kpi-value { font-size:27px; } .hero-kpi .kpi-value { font-size:30px; } }
 
 .brand-prism svg {display:block;width:28px;height:28px;flex:none;}
+.source-actions { display: flex; gap: 8px; width: 100%; }
+.source-actions button { flex: 1; }
+.source-time { font-size: 11px; color: var(--muted, #617a87); min-height: 28px; overflow-wrap: anywhere; }
+.source-error { font-size: 12px; color: #8d4c40; }
+.source-error p { overflow-wrap: anywhere; line-height: 1.6; }
+.source-selection { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; font-size: 13px; }
+.source-selection button { flex-shrink: 0; }

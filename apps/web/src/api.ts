@@ -8,6 +8,14 @@
  */
 
 const CSRF_HEADER = 'x-aicc-request';
+const authListeners = new Set<() => void>();
+let authenticationLost = false;
+export const isAuthenticationLost = (): boolean => authenticationLost;
+export function onAuthenticationLost(listener: () => void): () => void {
+  authListeners.add(listener);
+  return () => { authListeners.delete(listener); };
+}
+export function authenticationRestored(): void { authenticationLost = false; }
 
 /**
  * 当前工作区。
@@ -119,7 +127,13 @@ async function request<T>(
     const envelope = parsed as { error?: { code?: string; message?: string; details?: unknown } } | null;
     const code = envelope?.error?.code ?? 'unknown';
     const message = envelope?.error?.message ?? `请求失败（HTTP ${response.status}）`;
-    if (response.status === 401) throw new UnauthenticatedError(message);
+    if (response.status === 401) {
+      if (path !== '/api/session/pair' && !authenticationLost) {
+        authenticationLost = true;
+        for (const listener of authListeners) listener();
+      }
+      throw new UnauthenticatedError(message);
+    }
     throw new ApiError(response.status, code, message, envelope?.error?.details);
   }
 

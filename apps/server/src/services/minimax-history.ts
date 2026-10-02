@@ -1,3 +1,5 @@
+import { tokenCoverage } from '@aicc/core';
+import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
 /** Read-only MiniMax Code v2 canonical message history adapter. Never persists conversation content. */
 import { createReadStream } from 'node:fs';
 import { readdir } from 'node:fs/promises';
@@ -5,7 +7,7 @@ import { homedir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { ServiceContext } from '../service-context.js';
-import { getSetting, setSetting } from '../db/repos/system.js';
+import { getSetting } from '../db/repos/system.js';
 import type { CodexHistoryResponse, CodexHistoryTotals } from './codex-history.js';
 
 export type MinimaxHistoryResponse = CodexHistoryResponse;
@@ -55,13 +57,15 @@ export async function scanMinimaxHistory(options: MinimaxScanOptions = {}): Prom
     }
   }
   try { await walk(root); } catch (e) {
-    result.status = (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'empty' : 'error';
-    result.message = result.status === 'empty' ? '未找到 MiniMax Code 本机会话记录，未按 0 Token 处理。' : '无法读取 MiniMax Code 历史目录，请检查访问权限。';
+    result.status = 'error';
+    result.message = '无法读取 MiniMax Code 历史目录，请检查访问权限。';
     return result;
   }
   type Event = { totals: CodexHistoryTotals; model: string; session: string; at: string | null };
   const events = new Map<string, Event>();
   const conflicts = new Set<string>();
+  let readFailed = false;
+  let malformed = false;
   let scanned = 0;
   scan: for (const file of files.sort()) {
     const stream = createReadStream(file, { encoding: 'utf8' });
@@ -72,7 +76,7 @@ export async function scanMinimaxHistory(options: MinimaxScanOptions = {}): Prom
         if (!line.trim()) continue;
         if (line.length > 2_000_000) { warn('部分日志行过大，已跳过。'); continue; }
         let row: Record<string, unknown>;
-        try { row = record(JSON.parse(line)); } catch { warn('部分日志行不完整或损坏，已跳过。'); continue; }
+        try { row = record(JSON.parse(line)); } catch { malformed = true; warn('部分日志行不完整或损坏，已跳过。'); continue; }
         const message = record(row.message);
         if (message.role !== 'assistant') continue;
         const usage = record(message.usage);
@@ -92,7 +96,7 @@ export async function scanMinimaxHistory(options: MinimaxScanOptions = {}): Prom
           conflicts.add(id); warn('同一消息 ID 的用量存在冲突，已排除冲突消息。');
         } else if (!old) events.set(id, event);
       }
-    } catch { warn('部分历史文件读取失败，汇总可能不完整。'); }
+    } catch { readFailed = true; warn('部分历史文件读取失败，汇总可能不完整。'); }
     finally { lines.close(); stream.destroy(); }
   }
   type Bucket = { totals: CodexHistoryTotals; sessions: Set<string> };
@@ -126,8 +130,10 @@ export async function scanMinimaxHistory(options: MinimaxScanOptions = {}): Prom
   result.sessionCount = sessions.size;
   result.byModel = [...models].map(([model, b]) => ({ model, totals: b.totals, sessionCount: b.sessions.size }));
   result.byDay = [...days].sort(([a], [b]) => a.localeCompare(b)).map(([day, b]) => ({ day, totals: b.totals, sessionCount: b.sessions.size }));
-  result.status = sessions.size ? 'ok' : 'empty';
+  result.coverage = tokenCoverage([...events].filter(([id]) => !conflicts.has(id)).map(([, event]) => event.totals), result.totals);
+  result.status = readFailed || (malformed && !sessions.size) ? 'error' : sessions.size ? 'ok' : 'empty';
   result.message = sessions.size ? `已扫描 ${files.length} 个 MiniMax Code 日志文件，按消息 ID 去重汇总。` : '未找到有效的 MiniMax Code 用量记录，未按 0 Token 处理。';
+  if (result.status === 'error') result.message = '历史读取不完整；保留上次成功结果，请修复文件或访问权限后重试。';
   return result;
 }
 
@@ -136,18 +142,17 @@ export function getMinimaxHistory(ctx: ServiceContext): MinimaxHistoryResponse {
     const value = JSON.parse(getSetting(ctx.db, KEY) ?? 'null');
     if (value?.schemaVersion === 1 && ['ok', 'empty', 'error'].includes(value.status) && value.totals && Array.isArray(value.byModel) && Array.isArray(value.byDay) && Array.isArray(value.warnings)) {
       const { schemaVersion: _, ...response } = value;
-      return response;
+      return withHistorySync(ctx, KEY, response);
     }
   } catch { /* invalid cache is treated as not scanned */ }
-  return blank();
+  return withHistorySync(ctx, KEY, blank());
 }
 
 export function runMinimaxHistory(ctx: ServiceContext, options: MinimaxScanOptions = {}): Promise<MinimaxHistoryResponse> {
   const pending = inFlight.get(ctx);
   if (pending) return pending;
   const task = scanMinimaxHistory({ ...options, now: () => ctx.now() }).then(result => {
-    setSetting(ctx.db, KEY, JSON.stringify({ schemaVersion: 1, ...result }));
-    return result;
+    return saveHistoryAttempt(ctx, KEY, 1, result, options.minimaxHome ?? process.env.MINIMAX_HOME ?? join(homedir(), '.minimax'));
   });
   inFlight.set(ctx, task);
   void task.finally(() => inFlight.delete(ctx)).catch(() => undefined);

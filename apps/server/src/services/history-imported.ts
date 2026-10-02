@@ -1,6 +1,6 @@
 /** 已导入历史用量的全量、去重后汇总。 */
 
-import { aggregateTokens, type NormalizedTokens } from '@aicc/core';
+import { tokenCoverage, type TokenCoverage, aggregateTokens, type NormalizedTokens } from '@aicc/core';
 import { getAccount } from '../db/repos/registry.js';
 import { countedObservations, type UsageObservation } from '../db/repos/usage.js';
 import type { WorkspaceScope } from '../db/repos/workspace.js';
@@ -17,6 +17,7 @@ export interface ImportedHistoryTotals {
 export interface ImportedHistoryProvider {
   provider: string;
   totals: ImportedHistoryTotals;
+  coverage?: TokenCoverage;
   count: number;
   firstAt: string | null;
   lastAt: string | null;
@@ -167,6 +168,7 @@ export function importedHistory(
         reasoningOutputTokens: reasoning.value,
         totalTokens: totalTokens.value,
       },
+      coverage: tokenCoverage(providerRows.map(row => ({ inputTokens: row.inputTotal, cachedInputTokens: row.cachedInput, outputTokens: row.outputTotal, reasoningOutputTokens: row.reasoningOutput, totalTokens: row.totalReported })), { inputTokens: input.value, cachedInputTokens: cached.value, outputTokens: output.value, reasoningOutputTokens: reasoning.value, totalTokens: totalTokens.value }),
       count: providerRows.length,
       firstAt: starts[0] ?? null,
       lastAt: ends.at(-1) ?? null,

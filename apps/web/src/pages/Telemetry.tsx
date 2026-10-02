@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { HistoryDashboard } from '@aicc/core';
+import { historySync, startHistorySync } from '../history-sync.js';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { smoothPath } from '../chart-path.js';
 import { AdaptiveNumber } from '../AdaptiveNumber.js';
 import { api, getWorkspace } from '../api.js';
-import { aggregate, buildSources, calendarDays, formatNumber as number, LOCAL_SOURCES, sumKnown, type ImportedHistory, type LocalHistory, type SourceData, type TotalHistory } from '../analytics.js';
+import { aggregate, cacheInputRate, buildSources, calendarDays, formatNumber as number, LOCAL_SOURCES, sumKnown, type SourceData, type TotalHistory } from '../analytics.js';
 
 const COLORS = ['#18aab8', '#63a4ee', '#52bea2', '#9a98df', '#e4b06b', '#6c9da9'];
 type Point = { day: string; value: number | null };
@@ -12,7 +14,8 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
   const [sources, setSources] = useState<SourceData[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
+  const progress = useSyncExternalStore(historySync.subscribe, historySync.snapshot);
+  const busy = Object.values(progress).some(p => p.phase === 'queued' || p.phase === 'running');
   const [selected, setSelected] = useState('all');
   const [period, setPeriod] = useState(30);
   const [chart, setChart] = useState<'area' | 'bar'>('area');
@@ -20,70 +23,56 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
   const [directory, setDirectory] = useState('');
   const [deepseekOpen, setDeepseekOpen] = useState(false);
   const [updated, setUpdated] = useState<string | null>(null);
-  const syncLock = useRef(false);
   const demo = getWorkspace() === 'demo';
   const [navTarget, setNavTarget] = useState<HTMLElement | null>(null);
   useEffect(() => setNavTarget(document.getElementById('nav-sync')), []);
+  useEffect(() => historySync.onCompleted(reload), [reload]);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const requests = [...(demo ? [] : LOCAL_SOURCES.map(([id]) => [id, `/api/history/${id}`] as const)), ['imported', '/api/history/imported'], ['total', '/api/history/total']] as const;
-    void Promise.allSettled(requests.map(([, path]) => api.get(path))).then(results => {
+    void api.get<HistoryDashboard>('/api/history/dashboard').then(snapshot => {
       if (cancelled) return;
-      const local: Record<string, LocalHistory> = {};
-      let imported: ImportedHistory | undefined;
-      let nextTotal: TotalHistory | undefined;
-      const issues: string[] = [];
-      results.forEach((result, i) => {
-        const key = requests[i]![0];
-        if (result.status === 'rejected') { issues.push(`${key}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`); return; }
-        if (key === 'total') nextTotal = result.value as TotalHistory;
-        else if (key === 'imported') imported = result.value as ImportedHistory;
-        else local[key] = result.value as LocalHistory;
-      });
-      if (nextTotal) { setTotal(nextTotal); setSources(buildSources(nextTotal, local, imported)); setUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false })); }
-      setErrors(issues); setLoading(false);
+      setTotal(snapshot.total);
+      const next = buildSources(snapshot.total, snapshot.local, snapshot.imported);
+      setSources(next);
+      const latest = next.map(s => s.sync ? s.sync.lastSuccessAt : s.checkedAt).filter((at): at is string => !!at).sort().at(-1);
+      setUpdated(latest ? new Date(latest).toLocaleString('zh-CN', { hour12: false }) : null);
+      setErrors([]); setLoading(false);
+      if (!demo) startHistorySync();
+    }).catch(error => {
+      if (!cancelled) { setErrors([error instanceof Error ? error.message : String(error)]); setLoading(false); }
     });
     return () => { cancelled = true; };
   }, [refreshToken, demo]);
   const sync = useCallback(async (id: string) => {
-    if (syncLock.current || demo) return;
-    syncLock.current = true; setBusy(id); setErrors([]); setSyncMessage('');
-    const issues: string[] = [];
-    try {
-      for (const target of id === 'all' ? ['codex', 'workbuddy', 'opencode', 'minimax'] : [id]) {
-        try {
-          const result = await api.post<LocalHistory>(`/api/history/${target}`, target === 'deepseek' ? { directory: directory.trim() } : {});
-          if (result.status === 'error') issues.push(`${target}: ${result.message}`);
-          if (target === 'deepseek' && result.status === 'ok') setDeepseekOpen(false);
-        } catch (error) { issues.push(`${target}: ${error instanceof Error ? error.message : String(error)}`); }
-      }
-      if (issues.length) setSyncMessage(issues.join(' / '));
-      else setSyncMessage('');
-      reload();
-    } finally { syncLock.current = false; setBusy(null); }
-  }, [demo, directory, reload]);
-  const [syncMessage, setSyncMessage] = useState('');
+    if (demo) return;
+    await historySync.sync(id === 'all' ? ['codex', 'workbuddy', 'opencode', 'minimax'] : [id],
+      id === 'deepseek' ? { directory: directory.trim() } : {});
+    if (id === 'deepseek' && historySync.snapshot().deepseek?.phase === 'ok') setDeepseekOpen(false);
+  }, [demo, directory]);
   const data = useMemo(() => aggregate(sources, selected), [sources, selected]);
   const visibleDays = useMemo(() => calendarDays(data.days, period || (data.days.length ? Math.round((Date.parse(data.days.at(-1)!.day) - Date.parse(data.days[0]!.day)) / 86400000) + 1 : 0)), [data.days, period]);
   const heatDays = useMemo(() => calendarDays(data.days, 91), [data.days]);
   const activeTotal = selected === 'all' ? total?.totalTokens : sources.find(s => s.id === selected)?.total;
-  const cachedRate = data.input != null && data.input > 0 && data.cached != null ? Math.min(100, data.cached / data.input * 100) : null;
+  const cachedRate = cacheInputRate(data.active);
   const endDay = data.days.at(-1)?.day;
   const dailySum = sumKnown(visibleDays.map(p => p.value));
   const peak = visibleDays.reduce<Point | null>((best, p) => p.value != null && (best == null || p.value > (best.value ?? -1)) ? p : best, null);
   const fmt = (v: number | null | undefined) => <AdaptiveNumber value={v} />;
   const included = sources.filter(s => s.included && s.total != null);
+  const codexSource = data.active.find(s => s.id === 'codex');
+  const officialCodex = codexSource?.statisticsSource === 'official';
+  const codexNote = total?.partial ? '已知用量合计' : '历史累计';
   return <div className="telemetry" aria-busy={loading}>
     <div className="telemetry-heading"><div><h1>用量统计<span className="heading-dot">.</span></h1></div></div>
     {navTarget && createPortal(<button className="nav-sync-button" aria-label="同步本机用量" title={busy ? '正在同步…' : '同步并刷新本机用量'} disabled={!!busy || demo} onClick={() => void sync('all')}><span className={busy ? 'spin' : ''}>↻</span></button>, navTarget)}
     {!!errors.length && <div className="telemetry-notice error" role="alert">部分数据读取失败，现有数据可能不是最新。{errors.join(' / ')}<button onClick={reload}>重试</button></div>}
-    {!!syncMessage && <div className="telemetry-notice error" role="alert">{syncMessage}<button aria-label="关闭同步提示" onClick={() => setSyncMessage('')}>×</button></div>}
+    {codexSource?.officialMessage && !officialCodex && <div className="telemetry-notice" role="status">Codex：{codexSource.officialMessage}</div>}
     <section className="kpi-grid" aria-label="核心用量指标">
-      <Kpi title="累计 Token" value={fmt(activeTotal)} exact={number(activeTotal)} note={total?.partial ? '已知用量合计' : '历史累计'} hero><MiniSpark days={data.days} /></Kpi>
+      <Kpi title="累计 Token" value={fmt(activeTotal)} exact={number(activeTotal)} note={codexNote} hero><MiniSpark days={data.days} /></Kpi>
       <Kpi title="输入 Token" value={fmt(data.input)} exact={number(data.input)}><span className="kpi-glyph">↗</span></Kpi>
       <Kpi title="输出 Token" value={fmt(data.output)} exact={number(data.output)}><span className="kpi-glyph">↙</span></Kpi>
-      <Kpi title="缓存输入占比" value={cachedRate == null ? '—' : `${cachedRate.toFixed(1)}%`} exact={`${number(data.cached)} / ${number(data.input)}`}><svg className="cache-ring" viewBox="0 0 50 50" aria-hidden="true"><circle cx="25" cy="25" r="19" /><circle cx="25" cy="25" r="19" pathLength="100" strokeDasharray={`${cachedRate ?? 0} 100`} /></svg></Kpi>
+      <Kpi title="缓存输入占比" value={cachedRate == null ? '—' : `${cachedRate.toFixed(1)}%`} exact={cachedRate == null ? '缓存与输入的覆盖不完整、未知或数值异常，不能计算占比。' : `${number(data.cached)} / ${number(data.input)}`}><svg className="cache-ring" viewBox="0 0 50 50" aria-hidden="true"><circle cx="25" cy="25" r="19" /><circle cx="25" cy="25" r="19" pathLength="100" strokeDasharray={`${cachedRate ?? 0} 100`} /></svg></Kpi>
     </section>
     <div className="chart-grid" id="activity">
       <section className="data-panel trend-panel"><PanelHead title="用量趋势" accessory={<div className="segmented" aria-label="趋势时间范围">{[[7,'7 天'],[30,'30 天'],[90,'90 天'],[0,'全部']].map(([value,text]) => <button key={value} aria-pressed={period === value} onClick={() => setPeriod(Number(value))}>{text}</button>)}</div>} />
@@ -100,10 +89,25 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
       <section className="data-panel composition-panel"><PanelHead title="Token 构成" /><div className="composition-total"><span>输入 + 输出</span><strong>{fmt(sumKnown([data.input, data.output]))}</strong></div><div className="composition-track" aria-label="输入与输出比例">{[['输入',data.input],['输出',data.output]].map(([name,value],i) => <span key={name} title={`${name} ${number(value as number | null)}`} style={{ width: `${(sumKnown([data.input,data.output]) ?? 0) > 0 ? Number(value ?? 0) / sumKnown([data.input,data.output])! * 100 : 0}%`, background: COLORS[i] }} />)}</div><div className="composition-rows">{[['输入',data.input],['输出',data.output],['缓存输入',data.cached],['推理输出',data.reasoning]].map(([name,value],i) => <div key={name}><span><i style={{background:COLORS[i % 2]}} />{name}</span><strong title={number(value as number | null)}>{fmt(value as number | null)}</strong></div>)}</div><p className="panel-note">缓存、推理为子项</p></section>
       <section className="data-panel heat-panel"><PanelHead title="活动热力图" accessory={<span className="subtle-chip">13 周</span>} /><Heatmap days={heatDays} /><div className="heat-insight"><strong>{heatDays.some(d => d.value != null) ? heatDays.filter(d => d.value != null && d.value > 0).length : '—'}</strong><span>活跃天数<br /><small>{endDay ? `截至 ${endDay}` : '尚未同步'}</small></span></div></section>
     </div>
-    <section className="data-panel source-panel" id="sources"><PanelHead title="数据源" accessory={<span className="read-time">{loading ? '读取中…' : updated ? `读取于 ${updated}` : '尚未读取'}</span>} />
-      <div className="source-strip">{LOCAL_SOURCES.map(([id,name],index) => { const source = sources.find(s => s.id === id); return <div className="source-tile" key={id}><div className="source-tile-top"><span className="provider-icon" style={{color:COLORS[index]}}>{name[0]}</span><strong>{name}</strong><span className={`source-led ${source?.included ? 'ready' : ''}`} title={source?.included ? '已计入统计' : '尚未计入'} /></div><strong className="source-value" title={number(source?.total)}>{fmt(source?.total)}</strong><span className="source-state">{demo ? '示例模式' : source?.included ? '已计入' : source?.total != null ? '可能重叠' : '等待同步'}</span><button disabled={!!busy || demo} onClick={() => id === 'deepseek' ? setDeepseekOpen(!deepseekOpen) : void sync(id)}>{busy === id || busy === 'all' && id !== 'deepseek' ? '同步中…' : id === 'deepseek' ? '读取历史导出 ↗' : '同步 ↻'}</button></div>; })}</div>
-      {deepseekOpen && <form className="deepseek-form" onSubmit={e => { e.preventDefault(); void sync('deepseek'); }}><label htmlFor="deepseek-directory">DeepSeek 导出目录</label><div><input id="deepseek-directory" value={directory} onChange={e => setDirectory(e.target.value)} placeholder="包含 ZIP / CSV 的文件夹路径" required /><button className="sync-button" disabled={!!busy || !directory.trim()}>读取并统计</button></div></form>}
-      <details className="methodology"><summary>统计口径</summary><div className="analytics-table"><table><thead><tr><th>来源</th><th className="num">Token</th><th>合计规则</th></tr></thead><tbody>{sources.map(source => <tr key={source.id}><td>{source.label}</td><td className="num">{number(source.total)}</td><td>{source.included ? '已计入' : source.reason ?? '未知'}</td></tr>)}</tbody></table></div><p>总量以服务端统计为准，图表仅聚合已计入的来源；无记录的日期保持未知。本机记录按 UTC 日期，DeepSeek 按导出日期，跨来源的日边界可能不同。</p>{[...new Set([...(total?.warnings ?? []),...data.active.flatMap(s => s.warnings)])].map(w => <p key={w}>{w}</p>)}</details>
+    <section className="data-panel source-panel" id="sources"><PanelHead title="数据源" accessory={<span className="read-time">{loading ? '读取中…' : updated ? `最近成功同步 ${updated}` : '尚无成功同步'}</span>} />
+      {selected !== 'all' && <div className="source-selection" role="status"><span>正在查看：{sources.find(s => s.id === selected)?.label}{sources.find(s => s.id === selected)?.included === false ? ' · ' + (sources.find(s => s.id === selected)?.reason ?? '未计入全部合计') : ''}</span><button onClick={() => setSelected('all')}>查看全部</button></div>}
+      <div className="source-strip">{LOCAL_SOURCES.map(([id,name],index) => {
+        const source = sources.find(s => s.id === id);
+        const task = progress[id];
+        const running = task?.phase === 'running' || task?.phase === 'queued';
+        const failed = task?.phase === 'error' || source?.sync?.lastAttempt?.status === 'error';
+        const lastSuccess = source?.sync ? source.sync.lastSuccessAt : source?.checkedAt;
+        const failure = task?.phase === 'error' ? task.message : source?.sync?.lastAttempt?.message;
+        return <div className="source-tile" key={id} data-source={id}><div className="source-tile-top"><span className="provider-icon" style={{color:COLORS[index]}}>{name[0]}</span><strong>{name}</strong><span className={`source-led ${source?.included ? 'ready' : ''}`} title={source?.included ? '已计入统计' : '尚未计入'} /></div>
+          <strong className="source-value" title={number(source?.total)}>{fmt(source?.total)}</strong>
+          <span className="source-state" title={failed ? failure : source?.reason ?? ''}>{demo ? '示例模式' : running ? task.phase === 'queued' ? '等待同步' : '同步中…' : failed ? source?.sync?.stale ? '同步失败 · 显示旧数据' : '同步失败' : source?.included ? '已计入' : source?.total != null ? '未计入总量' : source?.sync?.lastAttempt?.status === 'empty' ? '未发现记录' : '等待同步'}</span>
+          <time className="source-time" dateTime={lastSuccess ?? undefined} title={lastSuccess ?? '尚无成功同步'}>{lastSuccess ? new Date(lastSuccess).toLocaleString('zh-CN', {hour12:false}) : '尚无成功同步'}</time>
+          <div className="source-actions"><button disabled={running || demo} onClick={() => id === 'deepseek' ? setDeepseekOpen(!deepseekOpen) : void sync(id)}>{running ? '同步中…' : id === 'deepseek' ? '读取历史导出 ↗' : failed ? '重试 ↻' : '同步 ↻'}</button><button aria-pressed={selected === id} disabled={source?.total == null} onClick={() => setSelected(selected === id ? 'all' : id)}>查看</button></div>
+          {failed && !demo && <details className="source-error"><summary>失败原因</summary><p>{failure}</p></details>}
+        </div>;
+      })}</div>
+      {deepseekOpen && <form className="deepseek-form" onSubmit={e => { e.preventDefault(); void sync('deepseek'); }}><label htmlFor="deepseek-directory">DeepSeek 导出目录</label><div><input id="deepseek-directory" value={directory} onChange={e => setDirectory(e.target.value)} placeholder="包含 ZIP / CSV 的文件夹路径" required /><button className="sync-button" disabled={progress.deepseek?.phase === 'running' || progress.deepseek?.phase === 'queued' || !directory.trim()}>读取并统计</button></div></form>}
+      <details className="methodology"><summary>统计口径</summary><div className="analytics-table"><table><thead><tr><th>来源</th><th className="num">Token</th><th>合计规则</th></tr></thead><tbody>{sources.map(source => <tr key={source.id} data-source={source.id}><td>{source.label}{source.id === 'codex' ? source.statisticsSource === 'official' ? '（官方统计）' : '（本机日志）' : ''}</td><td className="num">{number(source.total)}</td><td>{source.included ? '已计入' : source.reason ?? '未知'} <button disabled={source.total == null} aria-label={`查看 ${source.label}`} onClick={() => setSelected(source.id)}>查看</button></td></tr>)}</tbody></table></div><p>总量以服务端统计为准，图表仅聚合已计入的来源；无记录的日期保持未知；曲线跨缺失日期实线连接仅用于展示趋势，不补入每日数值或区间合计。Codex 优先采用官方累计与每日记录。官方会话估算明细完整且与官方累计核对一致时，输入、输出、缓存及模型排行采用官方明细，否则采用本机日志。部分明细不冒充全账户明细，官方累计与本机日志不相加，未知分项不按比例补齐。官方数据不可用时回退并标明原因。本机记录按 UTC 日期，官方及 DeepSeek 按返回日期，跨来源的日边界可能不同。</p>{codexSource?.officialDetails && <p>{codexSource.officialDetails.message}{codexSource.officialDetails.status === 'partial' ? ` 已返回明细合计 ${number(codexSource.officialDetails.totals.totalTokens)} Token。` : ''}</p>}{[...new Set([...(total?.warnings ?? []),...data.active.flatMap(s => s.warnings)])].map(w => <p key={w}>{w}</p>)}</details>
     </section>
     <footer className="observatory-footer"><span><i className="live-dot" /> 本地存储</span></footer>
   </div>;

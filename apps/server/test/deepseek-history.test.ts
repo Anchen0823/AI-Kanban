@@ -157,7 +157,11 @@ test('成功扫描只缓存脱敏聚合，后续失败不覆盖最近成功结�
 
     const failed = await runDeepseekHistory(h.app.ctx, { directory: join(directory, 'missing') });
     assert.equal(failed.status, 'error');
-    assert.deepEqual(getDeepseekHistory(h.app.ctx), result);
+    const retained = getDeepseekHistory(h.app.ctx);
+    assert.deepEqual(retained.totals, result.totals);
+    assert.equal(retained.checkedAt, result.checkedAt);
+    assert.equal(retained.sync?.stale, true);
+    assert.equal(retained.sync?.lastAttempt?.status, 'error');
   } finally {
     await rm(directory, { recursive: true, force: true });
     h.close();

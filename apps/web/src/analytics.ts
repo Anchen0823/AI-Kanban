@@ -1,25 +1,12 @@
-export interface TokenTotals {
-  inputTokens: number | null; outputTokens: number | null; cachedInputTokens: number | null;
-  reasoningOutputTokens?: number | null; totalTokens: number | null;
-}
-export interface LocalHistory {
-  status: string; checkedAt?: string | null; totals: TokenTotals;
-  sessionCount?: number | null; firstAt: string | null; lastAt: string | null;
-  byDay: { day: string; totals: TokenTotals }[];
-  byModel: { model: string; totals: TokenTotals }[];
-  warnings: string[]; message: string;
-}
-export interface ImportedHistory {
-  providers: { provider: string; totals: TokenTotals; firstAt: string | null; lastAt: string | null;
-    byDay: { date: string; totalTokens: number | null }[];
-    byModel: { model: string | null; totalTokens: number | null }[] }[];
-}
-export interface TotalHistory {
-  totalTokens: number | null; partial: boolean; warnings: string[];
-  sources: { id: string; label: string; totalTokens: number | null; included: boolean; reason: string | null }[];
-}
+import type { HistoryTokens, TokenCoverage, HistorySync } from '@aicc/core';
+export type { HistoryTokens as TokenTotals, HistorySnapshot as LocalHistory, ImportedHistoryView as ImportedHistory, HistoryTotalResponse as TotalHistory } from '@aicc/core';
+import type { HistorySnapshot as LocalHistory, ImportedHistoryView as ImportedHistory, HistoryTotalResponse as TotalHistory } from '@aicc/core';
+type TokenTotals = HistoryTokens;
 export interface SourceData {
+  statisticsSource?: 'official' | 'local'; dailySource?: 'official' | 'local'; officialMessage?: string;
+  detailsSource?: 'official' | 'local'; officialDetails?: LocalHistory['officialDetails'];
   id: string; label: string; included: boolean; reason: string | null; total: number | null;
+  coverage?: TokenCoverage; sync?: HistorySync;
   totals?: TokenTotals; days: { day: string; value: number | null }[];
   models: { name: string; value: number | null }[]; checkedAt?: string | null; warnings: string[];
 }
@@ -39,7 +26,10 @@ export function buildSources(total: TotalHistory, local: Record<string, LocalHis
     const history = local[source.id];
     const provider = imported?.providers.find(p => `imported:${p.provider}` === source.id);
     return { ...source, label: LOCAL_SOURCES.find(([id]) => id === source.id)?.[1] ?? source.label.replace('已导入：', ''), total: source.totalTokens,
-      totals: history?.totals ?? provider?.totals, checkedAt: history?.checkedAt,
+      coverage: history?.detailCoverage ?? history?.coverage ?? provider?.coverage, sync: history?.sync,
+      totals: history?.detailTotals ?? history?.localTotals ?? history?.totals ?? provider?.totals, checkedAt: history?.checkedAt,
+      detailsSource: history?.detailsSource, officialDetails: history?.officialDetails,
+      statisticsSource: history?.statisticsSource, dailySource: history?.dailySource, officialMessage: history?.officialMessage,
       days: history?.byDay.map(row => ({ day: row.day, value: row.totals.totalTokens })) ?? provider?.byDay.map(row => ({ day: row.date, value: row.totalTokens })) ?? [],
       models: history?.byModel.map(row => ({ name: row.model, value: row.totals.totalTokens })) ?? provider?.byModel.map(row => ({ name: row.model ?? '未记录模型', value: row.totalTokens })) ?? [],
       warnings: history?.warnings ?? [],
@@ -75,4 +65,14 @@ export function calendarDays(days: { day: string; value: number | null }[], coun
     const day = new Date(last - (count - 1 - i) * 86400000).toISOString().slice(0, 10);
     return { day, value: map.get(day) ?? null };
   });
+}
+
+/** Both operands must cover exactly the same retained dataset. */
+export function cacheInputRate(sources: SourceData[]): number | null {
+  if (!sources.length || sources.some(s => s.coverage?.inputTokens !== 'complete' || s.coverage?.cachedInputTokens !== 'complete'
+    || s.totals?.inputTokens == null || s.totals.cachedInputTokens == null
+    || s.totals.cachedInputTokens < 0 || s.totals.cachedInputTokens > s.totals.inputTokens)) return null;
+  const input = sumKnown(sources.map(s => s.totals!.inputTokens));
+  const cached = sumKnown(sources.map(s => s.totals!.cachedInputTokens));
+  return input !== null && input > 0 && cached !== null ? cached / input * 100 : null;
 }
