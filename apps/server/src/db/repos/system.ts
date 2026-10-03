@@ -798,6 +798,8 @@ export function listAudit(
 /* ------------------------------------------------------------------ */
 
 const DEMO_TABLES = [
+  'history_detail_session',
+  'history_detail_source',
   'audit_event',
   'context_export',
   'api_credential',

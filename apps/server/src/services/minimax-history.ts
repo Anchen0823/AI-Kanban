@@ -1,5 +1,6 @@
 import { collectCacheInputSample, tokenCoverage } from '@aicc/core';
 import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
+import { DetailBuilder, attachDetails } from './history-detail-store.js';
 /** Read-only MiniMax Code v2 canonical message history adapter. Never persists conversation content. */
 import { createReadStream } from 'node:fs';
 import { readdir } from 'node:fs/promises';
@@ -39,6 +40,7 @@ export function normalizeMinimaxTokens(usage: Record<string, unknown>): CodexHis
 
 export async function scanMinimaxHistory(options: MinimaxScanOptions = {}): Promise<MinimaxHistoryResponse> {
   const result = blank();
+  const details = new DetailBuilder();
   result.checkedAt = new Date((options.now ?? Date.now)()).toISOString();
   const warn = (text: string): void => { if (!result.warnings.includes(text)) result.warnings.push(text); };
   warn('MiniMax Code 是客户端来源；API 账单及其他客户端可能包含相同请求，不能直接相加。');
@@ -77,6 +79,7 @@ export async function scanMinimaxHistory(options: MinimaxScanOptions = {}): Prom
         if (line.length > 2_000_000) { warn('部分日志行过大，已跳过。'); continue; }
         let row: Record<string, unknown>;
         try { row = record(JSON.parse(line)); } catch { malformed = true; warn('部分日志行不完整或损坏，已跳过。'); continue; }
+        details.metadata(basename(dirname(file)), row.title ?? row.sessionTitle, row.cwd);
         const message = record(row.message);
         if (message.role !== 'assistant') continue;
         const usage = record(message.usage);
@@ -120,6 +123,7 @@ export async function scanMinimaxHistory(options: MinimaxScanOptions = {}): Prom
   }
   for (const [id, event] of events) {
     if (conflicts.has(id)) continue;
+    details.add(event.session, event.model, event.at, event.totals);
     add(result.totals, event.totals); sessions.add(event.session);
     bucket(models, event.model, event); bucket(days, event.at?.slice(0, 10) ?? '未知日期', event);
     if (event.at) {
@@ -136,7 +140,7 @@ export async function scanMinimaxHistory(options: MinimaxScanOptions = {}): Prom
   result.status = readFailed || (malformed && !sessions.size) ? 'error' : sessions.size ? 'ok' : 'empty';
   result.message = sessions.size ? `已扫描 ${files.length} 个 MiniMax Code 日志文件，按消息 ID 去重汇总。` : '未找到有效的 MiniMax Code 用量记录，未按 0 Token 处理。';
   if (result.status === 'error') result.message = '历史读取不完整；保留上次成功结果，请修复文件或访问权限后重试。';
-  return result;
+  return attachDetails(result, details);
 }
 
 export function getMinimaxHistory(ctx: ServiceContext): MinimaxHistoryResponse {

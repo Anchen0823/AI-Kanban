@@ -1,6 +1,6 @@
 {
   "name": "@aicc/web",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "description": "React 工作台前端",
   "type": "module",
@@ -12,7 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@aicc/core": "0.3.1",
+    "@aicc/core": "0.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

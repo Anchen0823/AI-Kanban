@@ -9,14 +9,29 @@ import { aggregate, cacheInputSummary, buildSources, calendarDays, formatNumber 
 
 const COLORS = ['#18aab8', '#63a4ee', '#52bea2', '#9a98df', '#e4b06b', '#6c9da9'];
 type Point = { day: string; value: number | null };
-export function Telemetry({ refreshToken, reload }: { refreshToken: number; reload: () => void }): ReactNode {
+export function Telemetry({ refreshToken, reload, sourceOnly = false }: { refreshToken: number; reload: () => void; sourceOnly?: boolean }): ReactNode {
   const [total, setTotal] = useState<TotalHistory | null>(null);
   const [sources, setSources] = useState<SourceData[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [switchingSource, setSwitchingSource] = useState(false);
+  const switchCodexSource = async (source: 'official' | 'local') => {
+    setSwitchingSource(true);
+    try {
+      await api.post('/api/history/codex/source', { source });
+      const snapshot = await api.get<HistoryDashboard>('/api/history/dashboard');
+      setTotal(snapshot.total);
+      setSources(buildSources(snapshot.total, snapshot.local, snapshot.imported));
+    } catch (error) { setErrors([error instanceof Error ? error.message : String(error)]); }
+    finally { setSwitchingSource(false); }
+  };
   const progress = useSyncExternalStore(historySync.subscribe, historySync.snapshot);
   const busy = Object.values(progress).some(p => p.phase === 'queued' || p.phase === 'running');
-  const [selected, setSelected] = useState('all');
+  const [selected, setSelectedState] = useState('all');
+  const setSelected = (value: string) => {
+    setSelectedState(value);
+    if (sourceOnly) window.location.hash = '#overview';
+  };
   const [period, setPeriod] = useState(30);
   const [chart, setChart] = useState<'area' | 'bar'>('area');
   const [modelView, setModelView] = useState<'bars' | 'table'>('bars');
@@ -66,8 +81,8 @@ export function Telemetry({ refreshToken, reload }: { refreshToken: number; relo
   const codexSource = data.active.find(s => s.id === 'codex');
   const officialCodex = codexSource?.statisticsSource === 'official';
   const codexNote = total?.partial ? '已知用量合计' : '历史累计';
-  return <div className="telemetry" aria-busy={loading}>
-    <div className="telemetry-heading"><div><h1>用量统计<span className="heading-dot">.</span></h1></div></div>
+  return <div className={`telemetry${sourceOnly ? ' telemetry-source-only' : ''}`} aria-busy={loading}>
+    <div className="telemetry-heading"><div><h1>用量统计<span className="heading-dot">.</span></h1></div><div className="codex-source-switch"><span>Codex</span><div className="segmented" role="group" aria-label="Codex 统计来源">{(['official', 'local'] as const).map(source => <button key={source} disabled={demo || loading || switchingSource} aria-pressed={(sources.find(s => s.id === 'codex')?.selectedSource ?? 'official') === source} onClick={() => void switchCodexSource(source)}>{source === 'official' ? '官方' : '本地'}</button>)}</div></div></div>
     {navTarget && createPortal(<button className="nav-sync-button" aria-label="同步本机用量" title={busy ? '正在同步…' : '同步并刷新本机用量'} disabled={!!busy || demo} onClick={() => void sync('all')}><span className={busy ? 'spin' : ''}>↻</span></button>, navTarget)}
     {!!errors.length && <div className="telemetry-notice error" role="alert">部分数据读取失败，现有数据可能不是最新。{errors.join(' / ')}<button onClick={reload}>重试</button></div>}
     {codexSource?.officialMessage && !officialCodex && <div className="telemetry-notice" role="status">Codex：{codexSource.officialMessage}</div>}

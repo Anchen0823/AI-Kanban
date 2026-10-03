@@ -4,6 +4,8 @@ import { unknownCoverage, type HistorySnapshot, type HistorySync } from '@aicc/c
 import { tx } from '../db/database.js';
 import { getSetting, setSetting } from '../db/repos/system.js';
 import type { ServiceContext } from '../service-context.js';
+import { LOCAL_HISTORY_SOURCES, type LocalHistorySource } from '@aicc/core';
+import { saveDetailAttempt, localDetailStatus } from './history-detail-store.js';
 
 interface SyncState extends HistorySync { scope: string }
 function state(ctx: ServiceContext, key: string): SyncState | null {
@@ -33,6 +35,14 @@ export function saveHistoryAttempt<T extends HistorySnapshot>(
   const meta: SyncState = { scope, lastAttempt: { at, status: result.status === 'not_scanned' ? 'error' : result.status, message: result.message },
     lastSuccessAt: preserve ? previous!.lastSuccessAt : failed ? null : at, stale: preserve };
   tx(ctx.db, () => {
+    const source = key.replace(/^history\./, '') as LocalHistorySource;
+    if (LOCAL_HISTORY_SOURCES.includes(source)) saveDetailAttempt(ctx, source, scope, result);
+    if (source === 'codex') {
+      const localStatus = localDetailStatus(result);
+      if (localStatus === 'ok' || localStatus === 'empty') {
+        setSetting(ctx.db, 'history.codex.localIndexSnapshot', JSON.stringify({ scope, snapshot: result.localSnapshot ?? result }));
+      }
+    }
     if (!preserve) setSetting(ctx.db, key, JSON.stringify({ schemaVersion, ...result }));
     setSetting(ctx.db, `${key}.sync`, JSON.stringify(meta));
   });

@@ -121,3 +121,4 @@ html { scroll-behavior:smooth; scroll-padding-top:96px; } body { font-size:13px;
 .source-error p { overflow-wrap: anywhere; line-height: 1.6; }
 .source-selection { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; font-size: 13px; }
 .source-selection button { flex-shrink: 0; }
+.codex-source-switch { display:flex; align-items:center; gap:10px; color:#507583; font-size:12px; }

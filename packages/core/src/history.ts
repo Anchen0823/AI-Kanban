@@ -43,6 +43,8 @@ export interface HistorySync {
   stale: boolean;
 }
 export interface HistorySnapshot {
+  selectedSource?: 'official' | 'local';
+  localSnapshot?: HistorySnapshot;
   /** Last successfully selected local export directory; only exposed in the user's real workspace. */
   sourceDirectory?: string;
   status: 'not_scanned' | 'ok' | 'empty' | 'error';

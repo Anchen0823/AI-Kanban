@@ -1,5 +1,6 @@
 import { collectCacheInputSample, tokenCoverage, type HistoryTokens } from '@aicc/core';
 import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
+import { DetailBuilder, attachDetails } from './history-detail-store.js';
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +26,7 @@ export function normalizeOpencodeTokens(row: Record<string, unknown>): CodexHist
 export interface OpencodeScanOptions { databasePath?: string; maxRecords?: number; now?: () => number }
 export async function scanOpencodeHistory(options: OpencodeScanOptions = {}): Promise<CodexHistoryResponse> {
   const result = blank();
+  const details = new DetailBuilder();
   result.checkedAt = new Date((options.now ?? Date.now)()).toISOString();
   const warn = (text: string): void => { if (!result.warnings.includes(text)) result.warnings.push(text); };
   warn('仅覆盖本机 OpenCode 数据库保留的已知用量。');
@@ -33,6 +35,14 @@ export async function scanOpencodeHistory(options: OpencodeScanOptions = {}): Pr
   try {
     db = new DatabaseSync(databasePath, { readOnly: true });
     db.exec('PRAGMA query_only = ON; PRAGMA busy_timeout = 1500; BEGIN');
+    const sessionColumns = new Set(db.prepare('PRAGMA table_info(session)').all().map(row => String(row.name)));
+    if (sessionColumns.has('id')) {
+      const title = sessionColumns.has('title') ? 'title' : 'NULL';
+      const directory = sessionColumns.has('directory') ? 'directory' : 'NULL';
+      for (const row of db.prepare(`SELECT id,${title} AS title,${directory} AS directory FROM session LIMIT 100000`).all()) {
+        details.metadata(String(row.id), row.title, row.directory);
+      }
+    }
     // Select only metadata and numeric usage, never message/tool bodies or account tables.
     const fields = (data: string): string => ['input', 'output', 'reasoning', 'total'].map(key => `json_extract(${data}, '$.tokens.${key}') AS ${key}`).join(',') + `,json_extract(${data}, '$.tokens.cache.read') AS cache_read,json_extract(${data}, '$.tokens.cache.write') AS cache_write`;
     const limit = options.maxRecords ?? 100_000;
@@ -81,6 +91,7 @@ export async function scanOpencodeHistory(options: OpencodeScanOptions = {}): Pr
       const session = String(row.session_id), model = modelName(row.model);
       const ms = numeric(row.time_created);
       const at = ms !== null && ms <= 8.64e15 ? new Date(ms).toISOString() : null;
+      details.add(session, model, at, totals);
       coverageRows.push(totals);
       add(result.totals, totals); sessions.add(session);
       bucket(models, model, session, totals); bucket(days, at?.slice(0, 10) ?? '未知日期', session, totals);
@@ -100,7 +111,7 @@ export async function scanOpencodeHistory(options: OpencodeScanOptions = {}): Pr
     result.status = 'error';
     result.message = '无法读取 OpenCode 用量，请确认本机数据库存在且格式受支持。';
   } finally { db?.close(); }
-  return result;
+  return attachDetails(result, details);
 }
 
 export function getOpencodeHistory(ctx: ServiceContext): CodexHistoryResponse {

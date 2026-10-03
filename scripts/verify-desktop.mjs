@@ -205,6 +205,86 @@ try {
   assert.equal(await evaluate(`document.body.innerText.includes('合成数据不计入真实统计')`),true);
   assert.equal(await evaluate(`document.querySelector('.nav-sync-button').disabled`),true);
   assert.notEqual(await evaluate(`document.querySelector('.hero-kpi .kpi-value').getAttribute('title')`),expectedTotal.toLocaleString('zh-CN'));
+  // The new explorer is backed by the real isolated SQLite index, including pagination and deep links.
+  async function navigateExplorer(hash) {
+    await evaluate(`location.hash=${JSON.stringify(hash)}`);
+    await waitFor(() => evaluate(`document.querySelector('.explorer')?.getAttribute('aria-busy') === 'false'`));
+    assert.equal(await evaluate(`!!document.querySelector('.explorer [role="alert"]')`), false);
+  }
+  await navigateExplorer('#sessions');
+  assert.equal(await evaluate(`document.querySelectorAll('.explorer-table tbody tr').length`),50);
+  assert.match(await evaluate(`document.querySelector('.explorer-pagination').textContent`),/72/);
+  await capture('explorer-sessions.png');
+  await clickLabel('下一页');
+  await waitFor(() => evaluate(`document.querySelectorAll('.explorer-table tbody tr').length===22`));
+  assert.equal(await evaluate(`location.hash.includes('page=2')`),true);
+  await evaluate(`document.querySelector('.explorer-title-link').click()`);
+  await waitFor(() => evaluate(`!!document.querySelector('.explorer-detail')`));
+  assert.match(await evaluate(`document.querySelector('.explorer-detail').textContent`),/首次已记录用量/);
+  await capture('explorer-session-detail.png');
+  await evaluate(`history.back()`);
+  await waitFor(() => evaluate(`!document.querySelector('.explorer-detail') && document.querySelectorAll('.explorer-table tbody tr').length===22`));
+  await navigateExplorer('#workspaces');
+  assert.equal(await evaluate(`document.querySelectorAll('.explorer-workspace-rank').length`),4);
+  await capture('explorer-workspaces.png');
+  await evaluate(`document.querySelector('.explorer-workspace-rank').click()`);
+  await waitFor(() => evaluate(`!!document.querySelector('.explorer-detail') && document.querySelector('.explorer')?.getAttribute('aria-busy')==='false'`));
+  await capture('explorer-workspace-detail.png');
+  await navigateExplorer('#analytics');
+  assert.equal(await evaluate(`document.querySelectorAll('.explorer-matrix tbody tr').length`),4);
+  await capture('explorer-analytics.png');
+  await evaluate(`document.querySelector('.explorer-matrix').scrollIntoView({block:'center',behavior:'instant'})`);
+  await capture('explorer-matrix.png');
+  await evaluate(`window.scrollTo({top:0,behavior:'instant'})`);
+  await clickLabel('折线');
+  await waitFor(() => evaluate(`!!document.querySelector('svg[aria-label="本机用量分组折线图"]')`));
+  await clickLabel('完整表格');
+  assert.equal(await evaluate(`document.querySelectorAll('.explorer-matrix').length`),0);
+  await clickLabel('热力图');
+  await evaluate(`document.querySelector('.explorer-matrix td a').focus()`);
+  assert.equal(await evaluate(`document.activeElement.matches('.explorer-matrix td a')`),true);
+  await command('Input.setIgnoreInputEvents',{ignore:false});
+  await command('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+  await command('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+  await command('Input.setIgnoreInputEvents',{ignore:true});
+  await waitFor(() => evaluate(`location.hash.startsWith('#sessions?') && document.querySelector('.explorer')?.getAttribute('aria-busy')==='false'`));
+  assert.equal(await evaluate(`location.hash.includes('workspaceId=') && location.hash.includes('model=')`),true);
+  assert.equal(await evaluate(`document.querySelector('select[aria-label="项目工作区"]').value.length>0`),true);
+  await reloadPage(); // URL survives refresh; data mode deliberately defaults to real after a full reload.
+  await waitFor(() => evaluate(`!!document.querySelector('.workspace-switch')`));
+  await clickLabel('示例数据');
+  await waitFor(() => evaluate(`document.querySelector('.explorer')?.getAttribute('aria-busy')==='false'`));
+  assert.equal(await evaluate(`document.querySelector('select[aria-label="明细模型"]').value.length>0`),true);
+  await navigateExplorer('#sessions');
+  await evaluate(`(() => {const input=document.querySelector('.explorer input[type="search"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'不存在的会话');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  await waitFor(() => evaluate(`!!document.querySelector('.explorer-empty')`));
+  assert.equal(await evaluate(`location.hash.includes('不存在')`),false);
+  await clickLabel('清除筛选');
+  await waitFor(() => evaluate(`document.querySelectorAll('.explorer-table tbody tr').length===50`));
+  // Force responses to arrive out of order to verify the obsolete result cannot replace the latest filter.
+  await evaluate(`(() => {window.__explorerFetch=window.fetch.bind(window);window.fetch=(url,options)=>{const promise=window.__explorerFetch(url,options);return String(url).includes('/api/history/sessions?source=codex')?new Promise(resolve=>setTimeout(()=>resolve(promise),700)):promise;};})()`);
+  await evaluate(`location.hash='#sessions?source=codex'`);
+  await delay(100);
+  await evaluate(`location.hash='#sessions?source=workbuddy'`);
+  await waitFor(() => evaluate(`document.querySelector('.explorer')?.getAttribute('aria-busy')==='false' && document.querySelector('.explorer-table')?.textContent.includes('WorkBuddy')`));
+  await delay(800);
+  assert.equal(await evaluate(`document.querySelector('.explorer-table').textContent.includes('Codex')`),false);
+  await evaluate(`window.fetch=window.__explorerFetch;delete window.__explorerFetch`);
+  for (const width of [1000,390]) {
+    await command('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:false});
+    for (const view of ['sessions','workspaces','analytics']) {
+      await navigateExplorer('#'+view);
+      assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth`),true,`Explorer ${view} overflow at ${width}`);
+      await capture(`explorer-${view}-${width}.png`);
+    }
+  }
+  await command('Emulation.setDeviceMetricsOverride',{width:1440,height:1080,deviceScaleFactor:1,mobile:false});
+  await evaluate(`location.hash='#sources'`);
+  await waitFor(() => evaluate(`document.querySelectorAll('.explorer-capabilities tbody tr').length===4`));
+  await capture('explorer-sources.png');
+  await evaluate(`location.hash='#overview'`);
+  await waitFor(() => evaluate(`!document.querySelector('.explorer') && document.querySelector('.hero-kpi').getClientRects().length>0`));
+  console.log('PASS: explorer sessions, directories, detail pages, charts, matrix drill-down, search, pagination, deep links, response race and responsive layouts.');
   await clickLabel('真实数据');
   await waitFor(() => evaluate(`document.querySelector('.hero-kpi .kpi-value')?.getAttribute('title') === ${JSON.stringify(expectedTotal.toLocaleString('zh-CN'))}`));
   const beforeSync = await evaluate(`fetch('/api/history/total').then(r => r.json())`);

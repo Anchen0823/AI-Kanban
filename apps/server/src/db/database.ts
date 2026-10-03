@@ -82,6 +82,8 @@ const PRAGMAS = [
   'PRAGMA foreign_keys = ON',
   'PRAGMA synchronous = NORMAL',
   'PRAGMA busy_timeout = 5000',
+  // Directory/model analytics sort bounded local buckets; avoid repeated disk-backed temporary sorts.
+  'PRAGMA temp_store = MEMORY',
 ];
 
 function wrap(raw: RawDatabase, driver: string, filePath: string): DbConnection {

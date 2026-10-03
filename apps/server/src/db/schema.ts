@@ -516,6 +516,30 @@ CREATE INDEX ix_audit_entity ON audit_event(entity_type, entity_id, at DESC);
 
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'init', sql: M1_INIT },
+  { version: 2, name: 'local_history_explorer', sql: `
+CREATE TABLE history_detail_source (
+  source TEXT NOT NULL, is_demo INTEGER NOT NULL DEFAULT 0, scope TEXT NOT NULL,
+  last_success_at TEXT, last_attempt_at TEXT NOT NULL, status TEXT NOT NULL, stale INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(source,is_demo)
+);
+CREATE TABLE history_detail_session (
+  id TEXT PRIMARY KEY, source TEXT NOT NULL, is_demo INTEGER NOT NULL DEFAULT 0,
+  source_session_id TEXT NOT NULL, title TEXT, directory TEXT, workspace_id TEXT NOT NULL
+);
+CREATE INDEX ix_detail_scope ON history_detail_session(is_demo,source,workspace_id);
+CREATE TABLE history_detail_bucket (
+  session_id TEXT NOT NULL REFERENCES history_detail_session(id) ON DELETE CASCADE,
+  day TEXT NOT NULL, model TEXT NOT NULL, records INTEGER NOT NULL,
+  first_at TEXT, last_at TEXT, sample_input INTEGER, sample_cached INTEGER, matched INTEGER NOT NULL,
+  inputTokens INTEGER, inputTokens_known INTEGER NOT NULL,
+  outputTokens INTEGER, outputTokens_known INTEGER NOT NULL,
+  cachedInputTokens INTEGER, cachedInputTokens_known INTEGER NOT NULL,
+  reasoningOutputTokens INTEGER, reasoningOutputTokens_known INTEGER NOT NULL,
+  totalTokens INTEGER, totalTokens_known INTEGER NOT NULL,
+  PRIMARY KEY(session_id,day,model)
+);
+CREATE INDEX ix_detail_day_model ON history_detail_bucket(day,model,session_id);
+` },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

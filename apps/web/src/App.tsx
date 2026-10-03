@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, authenticationRestored, onAuthenticationLost, getWorkspace, setWorkspace, type SessionInfo, type Workspace } from './api.js';
 import { Alert, Badge, Modal } from './ui.js';
 import { Telemetry } from './pages/Telemetry.js';
+import { HistoryExplorer } from './pages/HistoryExplorer.js';
+import { explorerHref, readExplorerLocation, type ExplorerView } from './explorer-state.js';
 export type PageKey = 'overview' | 'usage' | 'memory' | 'projects' | 'bridge' | 'settings';
 
 export interface PageProps {
@@ -26,7 +28,8 @@ export function App(): ReactNode {
   const [hasDemo, setHasDemo] = useState(false);
   const [motion, setMotion] = useState(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [fullscreen, setFullscreen] = useState(false);
-  const [section, setSection] = useState('overview');
+  const [hash, setHash] = useState(window.location.hash);
+  const { view } = readExplorerLocation(hash);
   const reload = useCallback(() => setRefreshToken(n => n + 1), []);
   const loadSession = useCallback(async () => {
     try {
@@ -46,9 +49,9 @@ export function App(): ReactNode {
   useEffect(() => { void loadSession(); }, [loadSession]);
   useEffect(() => { const change = () => setFullscreen(!!document.fullscreenElement); document.addEventListener('fullscreenchange', change); return () => document.removeEventListener('fullscreenchange', change); }, []);
   useEffect(() => {
-    const scroll = () => setSection(['sources','models','activity'].find(id => (document.getElementById(id)?.getBoundingClientRect().top ?? Infinity) <= 150) ?? 'overview');
-    window.addEventListener('scroll', scroll, { passive: true });
-    return () => window.removeEventListener('scroll', scroll);
+    const change = () => { setHash(window.location.hash); window.scrollTo(0, 0); };
+    window.addEventListener('hashchange', change);
+    return () => window.removeEventListener('hashchange', change);
   }, []);
   useEffect(() => { document.documentElement.style.scrollBehavior = motion ? 'smooth' : 'auto'; }, [motion]);
   function switchWorkspace(next: Workspace) { setWorkspace(next); setWorkspaceState(next); reload(); }
@@ -61,12 +64,16 @@ export function App(): ReactNode {
     <div className="ambient-field" aria-hidden="true"><i /><i /><i /></div>
     <header className="observatory-nav glass">
       <a className="aqua-brand" href="#overview" aria-label="AI Control Center 首页"><span className="brand-prism" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M16 3C17.8 11.8 20.2 14.2 29 16C20.2 17.8 17.8 20.2 16 29C14.2 20.2 11.8 17.8 3 16C11.8 14.2 14.2 11.8 16 3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" /></svg></span><span>AI Control Center</span></a>
-      <nav aria-label="统计区块">{[['overview','总览'],['activity','趋势'],['models','模型'],['sources','数据源']].map(([id,label]) => <a key={id} href={`#${id}`} aria-current={section === id ? 'location' : undefined}>{label}</a>)}</nav>
+      <nav aria-label="统计区块">{[['overview','总览'],['sessions','会话'],['workspaces','工作区'],['analytics','分析'],['sources','数据源']].map(([id,label]) => <a key={id} href={explorerHref(id as ExplorerView, { page: undefined })} aria-current={view === id ? 'page' : undefined}>{label}</a>)}</nav>
       <div className="nav-controls"><span className="connection-label" title="本地服务运行中"><i className="live-dot" /></span><span id="nav-sync" /><button aria-label="切换界面动效" aria-pressed={motion} onClick={() => setMotion(!motion)} title="切换界面动效">✧</button><button aria-label={fullscreen ? '退出全屏' : '进入全屏'} title={fullscreen ? '退出全屏' : '进入全屏'} onClick={async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { /* Keep the normal desktop window when fullscreen is unavailable. */ } }}>⛶</button></div>
     </header>
     <main className="observatory-main">
       {hasDemo && <div className="workspace-switch"><button aria-pressed={workspace === 'real'} onClick={() => switchWorkspace('real')}>真实数据</button><button aria-pressed={workspace === 'demo'} onClick={() => switchWorkspace('demo')}>示例数据</button>{workspace === 'demo' && <span>合成数据不计入真实统计</span>}</div>}
-      <Telemetry key={workspace} refreshToken={refreshToken} reload={reload} />
+      {view === 'overview' && <div className="explorer-entry"><a href={explorerHref('sessions')}>查看会话 →</a><a href={explorerHref('workspaces')}>按项目目录查看 →</a><a href={explorerHref('analytics')}>本机明细分析 →</a></div>}
+      <div hidden={view !== 'overview' && view !== 'sources'} className={view === 'sources' ? 'telemetry-source-only-container' : undefined}>
+        <Telemetry key={workspace} refreshToken={refreshToken} reload={reload} sourceOnly={view === 'sources'} />
+      </div>
+      {view !== 'overview' && <HistoryExplorer key={workspace} hash={hash} refreshToken={refreshToken} reload={reload} />}
     </main>
   </div>;
 }

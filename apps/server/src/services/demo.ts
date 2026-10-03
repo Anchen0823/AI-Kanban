@@ -23,6 +23,7 @@ import {
 import { countDemoRows, insertIntegration, purgeDemoData, hasDemoData } from '../db/repos/system.js';
 import type { ServiceContext } from '../service-context.js';
 import { audit } from './audit.js';
+import { seedExplorerDemo } from './history-explorer.js';
 import { createProposal, reviewProposal } from './memory.js';
 
 const HOUR = 3600 * 1000;
@@ -43,6 +44,7 @@ export function seedDemo(ctx: ServiceContext): SeedReport {
   const iso = (offsetMs: number): string => new Date(now + offsetMs).toISOString();
 
   return tx(ctx.db, () => {
+    seedExplorerDemo(ctx);
     const clientApp = createClient(ctx.db, {
       kind: 'chatgpt_app',
       displayName: '【示例】ChatGPT App',

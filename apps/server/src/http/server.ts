@@ -34,6 +34,7 @@ import { registerHistoryImportedRoutes } from './routes/history-imported.js';
 import { registerCodexHistoryRoutes } from './routes/history.js';
 import { registerDeepseekHistoryRoutes } from './routes/deepseek-history.js';
 import { registerHistoryTotalRoutes } from './routes/history-total.js';
+import { registerHistoryExplorerRoutes } from './routes/history-explorer.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -197,6 +198,7 @@ export function buildServer(deps: HttpDeps): FastifyInstance {
   registerCodexHistoryRoutes(fastify, deps);
   registerDeepseekHistoryRoutes(fastify, deps);
   registerHistoryTotalRoutes(fastify, deps);
+  registerHistoryExplorerRoutes(fastify, deps);
 
   fastify.get('/', (_request, reply) => {
     serveStatic(reply, config, '/');

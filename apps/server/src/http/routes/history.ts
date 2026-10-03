@@ -2,6 +2,8 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { ApiError } from '../errors.js';
+import { z } from 'zod';
+import { setSetting } from '../../db/repos/system.js';
 import type { HttpDeps } from '../server.js';
 import { requireUser, workspaceOf } from '../server.js';
 import { getCodexHistory, runCodexHistory } from '../../services/codex-history.js';
@@ -46,6 +48,14 @@ export function registerCodexHistoryRoutes(fastify: FastifyInstance, deps: HttpD
     reply.header('Cache-Control', 'no-store');
     realWorkspaceOnly(request);
     return getCodexHistory(deps.app.ctx);
+  });
+
+  fastify.post('/api/history/codex/source', async (request) => {
+    requireUser(request, '切换 Codex 统计来源');
+    realWorkspaceOnly(request);
+    const { source } = z.object({ source: z.enum(['official', 'local']) }).parse(request.body);
+    setSetting(deps.app.db, 'codex.statisticsSource', source);
+    return { ok: true };
   });
 
   fastify.post('/api/history/codex', async (request, reply) => {

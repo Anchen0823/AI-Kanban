@@ -1,6 +1,6 @@
 {
   "name": "ai-control-center",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "description": "AI Control Center — 个人 AI 历史用量与额度工作台",
   "type": "module",
@@ -26,6 +26,7 @@
     "desktop:pack": "npm run build && npm run desktop:prepare && electron-builder --config electron-builder.cjs --win --x64 --publish never",
     "test:desktop": "node --test apps/desktop/test/*.test.mjs",
     "verify:desktop": "node scripts/verify-desktop.mjs",
+    "verify:explorer": "node --disable-warning=ExperimentalWarning --import tsx scripts/verify-explorer.mjs",
     "verify:all": "node scripts/verify-all.mjs",
     "verify:release": "node scripts/verify-release.mjs"
   },

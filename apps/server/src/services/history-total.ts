@@ -4,7 +4,7 @@ export type { HistoryTotalSource, HistoryTotalResponse } from '@aicc/core';
 
 import type { WorkspaceScope } from '../db/repos/workspace.js';
 import type { ServiceContext } from '../service-context.js';
-import { getCodexHistory } from './codex-history.js';
+import { getCodexHistory, getCodexLocalHistory } from './codex-history.js';
 import { getDeepseekHistory } from './deepseek-history.js';
 import { getWorkbuddyHistory } from './workbuddy-history.js';
 import { getMinimaxHistory } from './minimax-history.js';
@@ -108,6 +108,7 @@ function importedOverlapsCodex(provider: string): boolean {
 export function historyTotal(
   ctx: ServiceContext,
   workspace: WorkspaceScope = 'real',
+  localDetails = false,
 ): HistoryTotalResponse {
   const imported = importedHistory(ctx, workspace);
   const candidates: HistoryTotalCandidate[] = [];
@@ -125,7 +126,7 @@ export function historyTotal(
         included: opencodeKnown, reason: opencodeKnown ? null : '尚无可用的 OpenCode 历史总量',
         partial: true, warnings: history.warnings });
     }
-    const codex = getCodexHistory(ctx);
+    const codex = localDetails ? getCodexLocalHistory(ctx) : getCodexHistory(ctx);
     const workbuddy = getWorkbuddyHistory(ctx);
     workbuddyKnown = workbuddy.status === 'ok' && workbuddy.totals.totalTokens !== null;
     candidates.push({

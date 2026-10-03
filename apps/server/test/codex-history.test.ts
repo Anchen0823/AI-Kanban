@@ -7,6 +7,30 @@ import { getSetting, setSetting } from '../src/db/repos/system.js';
 import { getCodexHistory, runCodexHistory, scanCodexHistory } from '../src/services/codex-history.js';
 import { createHarness } from './helpers.js';
 import { normalizeCodexAccountUsage, unavailableAccountUsage } from '../src/collectors/codex-account-usage.js';
+import { historyDashboard } from '../src/services/history-dashboard.js';
+
+test('Codex source selection switches the entire dashboard and preserves both snapshots', async () => {
+  const home = await fixtureHome();
+  const h = await createHarness();
+  try {
+    await runCodexHistory(h.app.ctx, { codexHome: home, readOfficial: async () => normalizeCodexAccountUsage({
+      summary: { lifetimeTokens: 9000 }, dailyUsageBuckets: [{ startDate: '2026-10-02', tokens: 8000 }],
+    }) });
+    const original = getSetting(h.app.ctx.db, 'history.codex');
+    assert.equal(getCodexHistory(h.app.ctx).totals.totalTokens, 9000);
+    setSetting(h.app.ctx.db, 'codex.statisticsSource', 'local');
+    const selected = getCodexHistory(h.app.ctx);
+    const local = await scanCodexHistory({ codexHome: home });
+    assert.equal(selected.selectedSource, 'local');
+    assert.deepEqual(selected.totals, local.totals);
+    assert.deepEqual(selected.byDay, local.byDay);
+    assert.deepEqual(selected.byModel, local.byModel);
+    assert.equal(historyDashboard(h.app.ctx, 'real').total.sources.find(s => s.id === 'codex')?.totalTokens, local.totals.totalTokens);
+    assert.equal(getSetting(h.app.ctx.db, 'history.codex'), original);
+    setSetting(h.app.ctx.db, 'codex.statisticsSource', 'official');
+    assert.equal(getCodexHistory(h.app.ctx).byDay[0]?.totals.totalTokens, 8000);
+  } finally { await h.close(); await rm(home, { recursive: true, force: true }); }
+});
 
 function line(type: string, payload: Record<string, unknown>, ordinal: number, timestamp: string): string {
   return JSON.stringify({ type, payload, ordinal, timestamp });

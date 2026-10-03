@@ -1,5 +1,6 @@
 import { collectCacheInputSample, tokenCoverage } from '@aicc/core';
 import { saveHistoryAttempt, withHistorySync } from './history-cache.js';
+import { DetailBuilder, attachDetails, detailHash } from './history-detail-store.js';
 /** Read-only WorkBuddy project JSONL adapter. Never persists conversation content. */
 import { createReadStream } from 'node:fs';
 import { readdir } from 'node:fs/promises';
@@ -22,6 +23,7 @@ const inFlight = new WeakMap<ServiceContext, Promise<WorkbuddyHistoryResponse>>(
 
 export async function scanWorkbuddyHistory(options: WorkbuddyScanOptions = {}): Promise<WorkbuddyHistoryResponse> {
   const result = blank();
+  const details = new DetailBuilder();
   result.checkedAt = new Date((options.now ?? Date.now)()).toISOString();
   const warn = (text: string): void => { if (!result.warnings.includes(text)) result.warnings.push(text); };
   warn('仅覆盖本机保留的 WorkBuddy 项目日志，不包含已删除或其他设备的历史。');
@@ -56,6 +58,8 @@ export async function scanWorkbuddyHistory(options: WorkbuddyScanOptions = {}): 
         if (line.length > 2_000_000) { warn('部分日志行过大，已跳过。'); continue; }
         let row: Record<string, unknown>;
         try { row = record(JSON.parse(line)); } catch { malformed = true; warn('部分日志行不完整或损坏，已跳过。'); continue; }
+        const sessionId = identifier(row.sessionId) ?? `file-${detailHash(file)}`;
+        details.metadata(sessionId, row.title ?? row.sessionTitle, row.cwd);
         if (row.type !== 'function_call' && !(row.type === 'message' && row.role === 'assistant')) continue;
         const usage = record(record(row.message).usage);
         if (!Object.keys(usage).length) continue;
@@ -79,7 +83,7 @@ export async function scanWorkbuddyHistory(options: WorkbuddyScanOptions = {}): 
         if (Object.values(totals).some(v => v === null)) warn('部分请求的输入、输出、缓存或推理字段缺失；分项仅为已知用量。');
         const ms = typeof row.timestamp === 'number' ? row.timestamp : typeof row.timestamp === 'string' ? Date.parse(row.timestamp) : NaN;
         const at = Number.isFinite(ms) && Math.abs(ms) <= 8.64e15 ? new Date(ms).toISOString() : null;
-        const event: Event = { totals, model: identifier(provider.model) ?? identifier(provider.requestModelId) ?? '未记录模型', session: identifier(row.sessionId) ?? file, at };
+        const event: Event = { totals, model: identifier(provider.model) ?? identifier(provider.requestModelId) ?? '未记录模型', session: sessionId, at };
         const old = events.get(id);
         if (old && (JSON.stringify(old.totals) !== JSON.stringify(totals) || old.model !== event.model)) {
           conflicts.add(id); warn('同一消息 ID 的用量存在冲突，已排除冲突消息。');
@@ -109,6 +113,7 @@ export async function scanWorkbuddyHistory(options: WorkbuddyScanOptions = {}): 
   }
   for (const [id, event] of events) {
     if (conflicts.has(id)) continue;
+    details.add(event.session, event.model, event.at, event.totals);
     add(result.totals, event.totals); sessions.add(event.session);
     bucket(models, event.model, event); bucket(days, event.at?.slice(0, 10) ?? '未知日期', event);
     if (event.at) {
@@ -125,7 +130,7 @@ export async function scanWorkbuddyHistory(options: WorkbuddyScanOptions = {}): 
   result.status = readFailed || (malformed && !sessions.size) ? 'error' : sessions.size ? 'ok' : 'empty';
   result.message = sessions.size ? `已扫描 ${files.length} 个 WorkBuddy 日志文件，按消息 ID 去重汇总。` : '未找到有效的 WorkBuddy 用量记录，未按 0 Token 处理。';
   if (result.status === 'error') result.message = '历史读取不完整；保留上次成功结果，请修复文件或访问权限后重试。';
-  return result;
+  return attachDetails(result, details);
 }
 
 export function getWorkbuddyHistory(ctx: ServiceContext): WorkbuddyHistoryResponse {

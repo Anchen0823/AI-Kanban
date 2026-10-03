@@ -3,6 +3,7 @@ export type { HistoryTokens as TokenTotals, HistorySnapshot as LocalHistory, Imp
 import type { HistorySnapshot as LocalHistory, ImportedHistoryView as ImportedHistory, HistoryTotalResponse as TotalHistory } from '@aicc/core';
 type TokenTotals = HistoryTokens;
 export interface SourceData {
+  selectedSource?: 'official' | 'local';
   statisticsSource?: 'official' | 'local'; dailySource?: 'official' | 'local'; officialMessage?: string;
   detailsSource?: 'official' | 'local'; officialDetails?: LocalHistory['officialDetails'];
   id: string; label: string; included: boolean; reason: string | null; total: number | null;
@@ -31,6 +32,7 @@ export function buildSources(total: TotalHistory, local: Record<string, LocalHis
       cacheInputSample: history?.cacheInputSample ?? provider?.cacheInputSample,
       totals: history?.detailTotals ?? history?.localTotals ?? history?.totals ?? provider?.totals, checkedAt: history?.checkedAt,
       detailsSource: history?.detailsSource, officialDetails: history?.officialDetails,
+      selectedSource: history?.selectedSource,
       statisticsSource: history?.statisticsSource, dailySource: history?.dailySource, officialMessage: history?.officialMessage,
       days: history?.byDay.map(row => ({ day: row.day, value: row.totals.totalTokens })) ?? provider?.byDay.map(row => ({ day: row.date, value: row.totalTokens })) ?? [],
       models: history?.byModel.map(row => ({ name: row.model, value: row.totals.totalTokens })) ?? provider?.byModel.map(row => ({ name: row.model ?? '未记录模型', value: row.totalTokens })) ?? [],
