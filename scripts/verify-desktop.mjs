@@ -207,8 +207,9 @@ try {
   assert.notEqual(await evaluate(`document.querySelector('.hero-kpi .kpi-value').getAttribute('title')`),expectedTotal.toLocaleString('zh-CN'));
   // The new explorer is backed by the real isolated SQLite index, including pagination and deep links.
   async function navigateExplorer(hash) {
+    const heading = { sessions: '会话.', workspaces: '工作区.', analytics: '联动分析.' }[hash.slice(1).split('?')[0]];
     await evaluate(`location.hash=${JSON.stringify(hash)}`);
-    await waitFor(() => evaluate(`document.querySelector('.explorer')?.getAttribute('aria-busy') === 'false'`));
+    await waitFor(() => evaluate(`document.querySelector('.explorer h1')?.textContent === ${JSON.stringify(heading)} && document.querySelector('.explorer')?.getAttribute('aria-busy') === 'false' && ['source','workspaceId','model'].every((key,index) => document.querySelector('select[aria-label="'+['明细来源','项目工作区','明细模型'][index]+'"]')?.value === (new URLSearchParams(location.hash.split('?')[1]).get(key) ?? ''))`));
     assert.equal(await evaluate(`!!document.querySelector('.explorer [role="alert"]')`), false);
   }
   await navigateExplorer('#sessions');
@@ -247,7 +248,7 @@ try {
   await command('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
   await command('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
   await command('Input.setIgnoreInputEvents',{ignore:true});
-  await waitFor(() => evaluate(`location.hash.startsWith('#sessions?') && document.querySelector('.explorer')?.getAttribute('aria-busy')==='false'`));
+  await waitFor(() => evaluate(`location.hash.startsWith('#sessions?') && document.querySelector('.explorer h1')?.textContent==='会话.' && document.querySelector('.explorer')?.getAttribute('aria-busy')==='false' && document.querySelector('select[aria-label="项目工作区"]')?.value === new URLSearchParams(location.hash.split('?')[1]).get('workspaceId')`));
   assert.equal(await evaluate(`location.hash.includes('workspaceId=') && location.hash.includes('model=')`),true);
   assert.equal(await evaluate(`document.querySelector('select[aria-label="项目工作区"]').value.length>0`),true);
   await reloadPage(); // URL survives refresh; data mode deliberately defaults to real after a full reload.
