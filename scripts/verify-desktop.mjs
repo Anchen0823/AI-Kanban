@@ -199,8 +199,15 @@ try {
     await delay(150);
     assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`),true,'No overflow at '+width);
     if (width === 390) {
-      assert.match(await evaluate(`document.querySelector('.hero-kpi .kpi-value').textContent`), /[KMB]$/);
+      // Font metrics differ between Windows desktop and Server. Full digits are
+      // correct when they fit; force a narrow container to test compaction.
+      await waitFor(() => evaluate(`(() => { const n = document.querySelector('.hero-kpi .adaptive-number'); return n && n.scrollWidth <= n.clientWidth + 1; })()`));
       assert.equal(await evaluate(`document.querySelector('.hero-kpi .kpi-value').title`), expectedTotal.toLocaleString('zh-CN'));
+      await evaluate(`(() => { const n = document.querySelector('.hero-kpi .adaptive-number'); n.style.width = '6ch'; n.style.letterSpacing = 'normal'; })()`);
+      await waitFor(() => evaluate(`/[KMB]$/.test(document.querySelector('.hero-kpi .kpi-value').textContent)`));
+      assert.equal(await evaluate(`document.querySelector('.hero-kpi .adaptive-number').title`), expectedTotal.toLocaleString('zh-CN'));
+      await evaluate(`(() => { const n = document.querySelector('.hero-kpi .adaptive-number'); n.style.removeProperty('width'); n.style.removeProperty('letter-spacing'); })()`);
+      await waitFor(() => evaluate(`(() => { const n = document.querySelector('.hero-kpi .adaptive-number'); return n.scrollWidth <= n.clientWidth + 1; })()`));
     }
     await capture('aqua-'+width+'.png');
   }
