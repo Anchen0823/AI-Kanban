@@ -173,9 +173,20 @@ try {
   await evaluate(`document.querySelector('.donut-legend button.selected').click()`);
   await delay(100);
   assert.equal(await evaluate(`document.querySelectorAll('.donut-legend button.selected').length`),0);
-  await evaluate(`document.querySelector('[aria-label="切换界面动效"]').click()`);
-  await delay(100);
-  assert.equal(await evaluate(`document.querySelector('.aqua-app').dataset.motion`),'off');
+  // Windows runners can default to reduced motion. Verify both preferences
+  // explicitly instead of assuming the host starts with animations enabled.
+  for (const preference of ['reduce', 'no-preference']) {
+    await command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: preference }] });
+    await reloadPage();
+    const initial = preference === 'reduce' ? 'off' : 'on';
+    await waitFor(() => evaluate(`document.querySelector('.aqua-app')?.dataset.motion === ${JSON.stringify(initial)}`));
+    assert.equal(await evaluate(`matchMedia('(prefers-reduced-motion: reduce)').matches`), preference === 'reduce');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="切换界面动效"]').getAttribute('aria-pressed')`), String(initial === 'on'));
+    await evaluate(`document.querySelector('[aria-label="切换界面动效"]').click()`);
+    const toggled = initial === 'on' ? 'off' : 'on';
+    await waitFor(() => evaluate(`document.querySelector('.aqua-app')?.dataset.motion === ${JSON.stringify(toggled)}`));
+    assert.equal(await evaluate(`document.querySelector('[aria-label="切换界面动效"]').getAttribute('aria-pressed')`), String(toggled === 'on'));
+  }
   await clickLabel('读取历史导出 ↗');
   assert.equal(await evaluate(`!!document.querySelector('#deepseek-directory')`),true);
   await clickLabel('读取历史导出 ↗');
