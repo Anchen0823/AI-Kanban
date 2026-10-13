@@ -22,7 +22,7 @@ export class HistorySyncCoordinator {
   startOnce(): Promise<void> {
     if (this.started || !this.allowed()) return Promise.resolve();
     this.started = true;
-    return this.sync(['codex', 'workbuddy', 'opencode', 'minimax']);
+    return this.sync(['codex', 'workbuddy', 'opencode', 'minimax'], { automatic: true });
   }
   resetStartup(): void { this.started = false; }
   sync(ids: string[], body: unknown = {}): Promise<void> {
@@ -71,7 +71,9 @@ export function startHistorySync(): void {
     if (sessionStorage.getItem(STARTUP_KEY)) { historySync.resume(); return; }
     sessionStorage.setItem(STARTUP_KEY, '1');
   } catch { /* In-memory guard still handles restricted storage and StrictMode. */ }
-  void historySync.startOnce();
+  void api.get<{ syncPaused: boolean }>('/api/backup-settings').then(settings => {
+    if (!settings.syncPaused) void historySync.startOnce().then(() => api.post('/api/backup-settings/startup-sync-complete')).catch(() => undefined);
+  }).catch(() => undefined);
 }
 onAuthenticationLost(() => {
   historySync.cancelQueued(); historySync.resetStartup();

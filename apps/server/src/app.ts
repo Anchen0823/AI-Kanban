@@ -20,7 +20,8 @@ import {
   setSetting,
 } from './db/repos/system.js';
 import { DEFAULTS } from './config.js';
-import { createBackup, planRestore, restoreInPlace, type BackupReport, type RestorePlan } from './services/backup.js';
+import { createBackup, planRestore, restoreInPlace, recoverInterruptedRestore, type BackupReport, type RestorePlan } from './services/backup.js';
+import { Maintenance } from './services/maintenance.js';
 
 export interface BootstrapInfo {
   driver: string;
@@ -36,6 +37,7 @@ export interface BootstrapInfo {
 }
 
 export interface App {
+  maintenance: Maintenance;
   config: AppConfig;
   ctx: ServiceContext;
   get db(): DbConnection;
@@ -193,10 +195,12 @@ const BASELINE_INTEGRATIONS: Array<{
 ];
 
 export function createApp(config: AppConfig): App {
+  recoverInterruptedRestore(config);
   let opened = openDatabase({ filePath: config.dbFile });
   let ctx = createServiceContext({ db: opened.db, config, driver: opened.driver });
 
   const app: App = {
+    maintenance: new Maintenance(),
     config,
     ctx,
     get db() {
@@ -332,8 +336,7 @@ export function createApp(config: AppConfig): App {
      */
     restore(backupName: string): { plan: RestorePlan; preRestoreBackup: string | null } {
       const plan = planRestore(ctx, backupName);
-      const result = restoreInPlace(ctx, plan);
-      app.reopen();
+      const result = restoreInPlace(ctx, plan, () => app.reopen());
       return { plan, preRestoreBackup: result.preRestoreBackup };
     },
 

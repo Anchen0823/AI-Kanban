@@ -1,10 +1,10 @@
 # AI Control Center
 
-个人 AI 历史用量看板，v0.4。本地单用户，Windows 桌面版及本机网页版；数据保存在本机，不替换现有 AI 客户端。
+个人 AI 历史用量看板，v0.5。本地单用户，Windows 桌面版及本机网页版；可选 WebDAV 加密备份，不替换现有 AI 客户端。
 
 ## 使用
 
-Windows 双击 `release/current/AI-Control-Center-0.4.0-x64.exe`。也可以运行 `release/current/win-unpacked/AI Control Center.exe`，分享此目录时保留全部文件。桌面版包含 Node 和生产依赖，自动配对，关闭窗口后停止服务。
+Windows 双击 `release/current/AI-Control-Center-0.5.0-x64.exe`。也可以运行 `release/current/win-unpacked/AI Control Center.exe`，分享此目录时保留全部文件。桌面版包含 Node 和生产依赖，自动配对，关闭窗口后停止服务。
 
 源码需要 Node >=22.5，Windows CI 使用 Node 24：
 
@@ -35,7 +35,7 @@ npm start
 
 桌面数据默认位于 `%APPDATA%/AI Control Center/data`，可从「应用 → 打开数据目录」查看。网页版默认 `data/`；`AICC_DATA_DIR` 可覆盖。迁移现有数据前先退出原服务，再指定该目录启动。
 
-当前主界面提供用量统计及本机明细分析。记忆、自定义项目管理、MCP、通用导入及备份等旧后端接口仍保留，但没有管理入口；历史设计文档不代表当前页面导航。数据导出与备份恢复工具入口、真实 MCP 客户端联调和新来源扩展留待后续版本。
+主界面提供用量统计、本机明细分析及「数据管理」。数据管理支持本地备份、备份包导入导出、恢复预览、WebDAV 加密上传及每日自动备份。完整数据库备份包含本机元数据；云端凭据和备份密码独立存储，不进入备份。关窗后不执行自动任务，首次启用需保存网盘配置与独立密码。详见 [备份与换机恢复](docs/12-backups.md)。记忆、自定义项目管理、MCP 及通用用量导入等旧后端接口仍保留，但没有当前管理入口。
 
 HTTP 服务只监听回环地址，配对会话与代理凭据分权，写请求校验来源及 CSRF。网页版会话过期后重新配对；桌面版按 Alt 显示菜单，选择「应用 → 重新启动」。汇总缓存保存聚合数字及脱敏状态；独立本机明细索引保存会话标识、明确的标题和项目目录，不保存聊天正文、工具参数、凭据或历史源文件路径。数据库备份包含这些本机元数据。
 
@@ -50,6 +50,8 @@ npm run verify:release   # 项目外验证解包目录及便携 EXE，生成 man
 ```
 
 发布产物统一在 `release/current/`，验证报告和截图在 `tmp/`。发布清单包含版本、Git 提交、工作区是否未提交、源码指纹及 EXE SHA-256。测试通过不等于真实账户已经连接；默认桌面验证不会读取开发者账户。
+
+保留旧版时可分版本构建：`npm run desktop:pack -- --config.directories.output=release/v0.5.0`，再运行 `npm run verify:release -- release/v0.5.0` 验证该目录。
 
 目录：`packages/core` 共享纯逻辑与类型；`apps/server` Fastify + SQLite 与只读采集；`apps/web` React 单页；`apps/desktop` Electron；`apps/mcp` 保留的 stdio 服务。
 

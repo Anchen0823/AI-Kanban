@@ -18,6 +18,7 @@ import { CODEX_ADAPTER_ID, CODEX_ADAPTER_VERSION, probeCodex } from '../../colle
 import { storeProbeQuotaSnapshots } from '../../services/integration-probe.js';
 import { describeMcpSetup } from '../../services/mcp-setup.js';
 import { SCHEMA_VERSION } from '../../db/database.js';
+import { backupManager } from '../../services/backup-manager.js';
 import { getClient, listClients } from '../../db/repos/registry.js';
 import {
   databaseCounts,
@@ -227,8 +228,10 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
 
   fastify.post('/api/backups', async (request) => {
     requireUser(request, '备份');
+    if (workspaceOf(request) !== 'real') throw new ApiError(403, 'forbidden', '请切换到真实数据管理备份。');
     const input = z.object({ note: z.string().max(500).nullable().optional() }).parse(request.body ?? {});
     const report = app.backup(input.note ?? null);
+    backupManager(app).noteLocal();
     return {
       ok: true,
       name: report.name,
@@ -249,11 +252,15 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
 
   fastify.post('/api/backups/:name/restore', async (request) => {
     requireUser(request, '恢复备份（会覆盖当前数据库）');
+    if (workspaceOf(request) !== 'real') throw new ApiError(403, 'forbidden', '请切换到真实数据管理备份。');
     const { name } = z.object({ name: z.string().min(1).max(200) }).parse(request.params);
     // 必须在请求体里显式写 true。恢复是不可逆的高风险动作，不接受默认值。
     z.object({ confirm: z.literal(true) }).parse(request.body ?? {});
 
-    const result = app.restore(name);
+    const result = await app.maintenance.exclusive(() => {
+      backupManager(app).pauseSync();
+      return app.restore(name);
+    });
     audit(ctx, {
       action: 'backup.restore',
       entityType: 'backup',
@@ -275,6 +282,7 @@ export function registerSystemRoutes(fastify: FastifyInstance, deps: HttpDeps): 
 
   fastify.delete('/api/backups/:name', async (request) => {
     requireUser(request, '删除备份');
+    if (workspaceOf(request) !== 'real') throw new ApiError(403, 'forbidden', '请切换到真实数据管理备份。');
     const { name } = z.object({ name: z.string().min(1).max(200) }).parse(request.params);
     deleteBackup(app.config, name);
     return { ok: true, deleted: name };

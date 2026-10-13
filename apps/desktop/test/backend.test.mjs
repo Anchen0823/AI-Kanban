@@ -11,7 +11,10 @@ async function start(dir) {
     env: { ...process.env, AICC_DATA_DIR: dir }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   });
   const message = await Promise.race([
-    once(child, 'message').then(([value]) => value),
+    new Promise(resolve => child.on('message', value => {
+      if (value.type === 'backup-secret') child.send({ type: 'backup-secret-result', id: value.id, value: null });
+      else if (value.type === 'ready' || value.type === 'error') resolve(value);
+    })),
     once(child, 'exit').then(() => { throw new Error('Backend exited before ready'); }),
   ]);
   assert.equal(message.type, 'ready');

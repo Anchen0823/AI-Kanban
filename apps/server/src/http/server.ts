@@ -35,6 +35,8 @@ import { registerCodexHistoryRoutes } from './routes/history.js';
 import { registerDeepseekHistoryRoutes } from './routes/deepseek-history.js';
 import { registerHistoryTotalRoutes } from './routes/history-total.js';
 import { registerHistoryExplorerRoutes } from './routes/history-explorer.js';
+import { registerBackupRoutes } from './routes/backup.js';
+import { backupManager } from '../services/backup-manager.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -170,6 +172,15 @@ export function buildServer(deps: HttpDeps): FastifyInstance {
     request.principal = resolvePrincipal(request, deps);
   });
 
+  const releases = new WeakMap<FastifyRequest, () => void>();
+  fastify.addHook('preHandler', async request => {
+    if (request.method === 'POST' && /^\/api\/history\/(codex|workbuddy|opencode|minimax)(?:\?|$)/.test(request.url) && (request.body as { automatic?: boolean } | undefined)?.automatic && backupManager(deps.app).settings().syncPaused) throw new ApiError(409, 'sync_paused', '恢复后已暂停自动同步，请在数据管理中恢复同步。');
+    if (WRITE_METHODS.has(request.method) && !/^\/api\/backups\/[^/]+\/restore(?:\?|$)/.test(request.url)) releases.set(request, deps.app.maintenance.enter());
+  });
+  fastify.addHook('onResponse', async request => { releases.get(request)?.(); });
+  fastify.addHook('onListen', async () => { backupManager(deps.app).startScheduler(); });
+  fastify.addHook('onClose', async () => { await backupManager(deps.app).stop(); });
+
   fastify.setErrorHandler((error, request, reply) => {
     const apiError = toApiError(error);
     if (apiError.status >= 500) {
@@ -187,6 +198,7 @@ export function buildServer(deps: HttpDeps): FastifyInstance {
   });
 
   registerSystemRoutes(fastify, deps);
+  registerBackupRoutes(fastify, deps);
   registerRegistryRoutes(fastify, deps);
   registerUsageRoutes(fastify, deps);
   registerMemoryRoutes(fastify, deps);

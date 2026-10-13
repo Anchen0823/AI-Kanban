@@ -1,4 +1,5 @@
-const { app, BrowserWindow, Menu, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell, session, safeStorage } = require('electron');
+const { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } = require('node:fs');
 const { fork } = require('node:child_process');
 const { join, resolve } = require('node:path');
 
@@ -34,6 +35,20 @@ function startBackend() {
       }
     });
     child.on('message', message => {
+      if (message.type === 'backup-secret') {
+        try {
+          if (!safeStorage.isEncryptionAvailable()) throw new Error('系统密钥存储不可用');
+          const file = join(app.getPath('userData'), 'backup-secrets.bin');
+          let value = null;
+          if (message.operation === 'load') value = existsSync(file) ? JSON.parse(safeStorage.decryptString(readFileSync(file))) : null;
+          else if (message.operation === 'save' && message.value && typeof message.value.webdavPassword === 'string' && typeof message.value.backupPassword === 'string' && message.value.webdavPassword.length <= 1024 && message.value.backupPassword.length <= 1024) {
+            mkdirSync(app.getPath('userData'), { recursive: true });
+            writeFileSync(`${file}.tmp`, safeStorage.encryptString(JSON.stringify(message.value)), { flush: true });
+            renameSync(`${file}.tmp`, file);
+          } else throw new Error('不支持的密钥操作');
+          child.send({ type: 'backup-secret-result', id: message.id, value });
+        } catch { child.send({ type: 'backup-secret-result', id: message.id, error: '系统密钥存储不可用，请重新输入密码。' }); }
+      }
       if (message.type === 'ready') { clearTimeout(timer); resolveReady(message); }
       if (message.type === 'error') { clearTimeout(timer); reject(new Error(message.message)); }
     });

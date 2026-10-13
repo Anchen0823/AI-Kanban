@@ -1,9 +1,9 @@
 import type { ExplorerFilter } from '@aicc/core';
-export type ExplorerView = 'overview' | 'sessions' | 'workspaces' | 'analytics' | 'sources';
+export type ExplorerView = 'overview' | 'sessions' | 'workspaces' | 'analytics' | 'sources' | 'data';
 export function readExplorerLocation(hash: string = window.location.hash): { view: ExplorerView; id?: string; params: URLSearchParams } {
   const [path = '', query = ''] = hash.replace(/^#/, '').split('?');
   const [name, id] = path.split('/');
-  const view: ExplorerView = ['sessions', 'workspaces', 'analytics', 'sources'].includes(name ?? '') ? name as ExplorerView : 'overview';
+  const view: ExplorerView = ['sessions', 'workspaces', 'analytics', 'sources', 'data'].includes(name ?? '') ? name as ExplorerView : 'overview';
   return { view, id: id || undefined, params: new URLSearchParams(query) };
 }
 export function explorerHref(view: ExplorerView, changes: Record<string, string | undefined> = {}, id?: string, hash?: string): string {

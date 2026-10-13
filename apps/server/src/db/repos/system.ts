@@ -909,5 +909,6 @@ export function databaseCounts(db: DbConnection, includeDemo = false): DemoCount
   }
   out.memory_tombstone =
     db.prepare('SELECT COUNT(*) AS n FROM memory_tombstone').get<{ n: number }>()?.n ?? 0;
+  out.history_detail_bucket = db.prepare(`SELECT COUNT(*) AS n FROM history_detail_bucket b JOIN history_detail_session s ON s.id=b.session_id${includeDemo ? '' : ' WHERE s.is_demo=0'}`).get<{ n: number }>()?.n ?? 0;
   return out;
 }

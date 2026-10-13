@@ -10,14 +10,16 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { databaseCounts, type DemoCounts } from '../db/repos/system.js';
-import { TxAbort, SCHEMA_VERSION } from '../db/database.js';
+import { TxAbort, SCHEMA_VERSION, openDatabase, migrate, currentVersion } from '../db/database.js';
+import { createRequire } from 'node:module';
 import type { AppConfig } from '../config.js';
 import type { ServiceContext } from '../service-context.js';
 import { audit } from './audit.js';
+const APP_VERSION = (createRequire(import.meta.url)('../../package.json') as { version: string }).version;
 
 export interface BackupManifest {
   formatVersion: 1;
@@ -91,9 +93,10 @@ export function createBackup(ctx: ServiceContext, options: { note?: string | nul
     dir = join(ctx.config.backupDir, name);
     suffix += 1;
   }
-  mkdirSync(dir, { recursive: true });
-
-  const sqlitePath = join(dir, 'ai-control-center.sqlite');
+  mkdirSync(ctx.config.backupDir, { recursive: true });
+  const staging = mkdtempSync(join(ctx.config.backupDir, '.creating-'));
+  const sqlitePath = join(staging, 'ai-control-center.sqlite');
+  try {
   ctx.db.backupTo(sqlitePath);
 
   const manifest: BackupManifest = {
@@ -102,7 +105,7 @@ export function createBackup(ctx: ServiceContext, options: { note?: string | nul
     createdAt: new Date(ctx.now()).toISOString(),
     schemaVersion: SCHEMA_VERSION,
     sqliteDriver: ctx.driver,
-    appVersion: '0.1.0',
+    appVersion: APP_VERSION,
     sourceDbFile: basename(ctx.db.filePath),
     counts: databaseCounts(ctx.db, false),
     files: [{ name: 'ai-control-center.sqlite', bytes: statSync(sqlitePath).size, sha256: sha256File(sqlitePath) }],
@@ -114,7 +117,8 @@ export function createBackup(ctx: ServiceContext, options: { note?: string | nul
     ],
   };
 
-  writeFileSync(join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  writeFileSync(join(staging, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', flush: true });
+  renameSync(staging, dir);
 
   audit(ctx, {
     action: 'backup.create',
@@ -124,6 +128,7 @@ export function createBackup(ctx: ServiceContext, options: { note?: string | nul
   });
 
   return { name, dir, manifest, files: manifest.files.map((f) => join(dir, f.name)) };
+  } finally { rmSync(staging, { recursive: true, force: true }); }
 }
 
 export interface BackupListing {
@@ -250,6 +255,8 @@ export function planRestore(ctx: ServiceContext, name: string): RestorePlan {
     );
   }
 
+  validateBackupDatabase(ctx.config, join(dir, 'ai-control-center.sqlite'), listing.schemaVersion);
+
   return {
     backupName: name,
     dir,
@@ -284,31 +291,64 @@ export function restoreToEmptyPath(plan: RestorePlan, targetDbPath: string): { b
  * 就地恢复：关库 → 备份当前 → 换文件 → 清掉 WAL/SHM。
  * 返回后调用方必须重新打开数据库连接。
  */
-export function restoreInPlace(ctx: ServiceContext, plan: RestorePlan): { preRestoreBackup: string | null } {
+export function restoreInPlace(ctx: ServiceContext, plan: RestorePlan, reopen: () => void): { preRestoreBackup: string | null } {
   const preBackup = createBackup(ctx, { note: `恢复 ${plan.backupName} 之前的自动备份` });
-
   const target = ctx.db.filePath;
-  const walFile = `${target}-wal`;
-  const shmFile = `${target}-shm`;
-
-  ctx.db.checkpoint();
-  ctx.db.close();
-
+  const prepared = `${target}.restore-new`, rollback = `${target}.restore-old`, journal = `${target}.restore-journal`;
+  // Fully prepare before closing the live connection. All recovery paths are fixed siblings.
+  for (const suffix of ['-wal', '-shm']) rmSync(`${prepared}${suffix}`, { force: true });
+  copyFileSync(plan.sqlitePath, prepared);
+  let staged: ReturnType<typeof openDatabase> | undefined;
   try {
-    const bytes = readFileSync(plan.sqlitePath);
-    writeFileSync(target, bytes);
-    for (const sidecar of [walFile, shmFile]) {
-      if (existsSync(sidecar)) rmSync(sidecar, { force: true });
-    }
+    staged = openDatabase({ filePath: prepared }); migrate(staged.db); staged.db.checkpoint(); staged.db.close(); staged = undefined;
+    ctx.db.checkpoint();
+    copyFileSync(target, rollback);
+    writeFileSync(journal, 'prepared', { flush: true });
+    ctx.db.close();
+    for (const suffix of ['-wal', '-shm']) rmSync(`${target}${suffix}`, { force: true });
+    renameSync(prepared, target);
+    reopen();
+    rmSync(journal);
   } catch (err) {
-    throw new TxAbort(
-      'internal',
-      `恢复过程中断：${err instanceof Error ? err.message : String(err)}。` +
-        `当前数据库可能处于不一致状态。恢复前的自动备份在：${join(preBackup.dir)}`,
-    );
+    staged?.db.close();
+    if (existsSync(journal)) {
+      try { ctx.db.close(); } catch { /* closed already */ }
+      recoverInterruptedRestore(ctx.config);
+      reopen();
+    }
+    throw new TxAbort('internal', '恢复失败，原数据已保留。请检查磁盘空间和文件占用后重试。', { cause: err instanceof Error ? err.name : 'Error' });
+  } finally {
+    if (!existsSync(journal)) for (const file of [prepared, rollback, `${prepared}-wal`, `${prepared}-shm`]) {
+      try { rmSync(file, { force: true }); } catch { /* An orphaned staging file must not turn a committed restore into an error. */ }
+    }
   }
-
   return { preRestoreBackup: preBackup.dir };
+}
+
+export function recoverInterruptedRestore(config: AppConfig): boolean {
+  const target = config.dbFile, journal = `${target}.restore-journal`, rollback = `${target}.restore-old`;
+  if (!existsSync(journal)) return false;
+  if (!existsSync(rollback)) throw new Error('恢复回滚文件缺失，请使用恢复前备份修复；已停止启动。');
+  copyFileSync(rollback, target);
+  for (const suffix of ['-wal', '-shm']) rmSync(`${target}${suffix}`, { force: true });
+  rmSync(journal);
+  for (const file of [rollback, `${target}.restore-new`, `${target}.restore-new-wal`, `${target}.restore-new-shm`]) rmSync(file, { force: true });
+  return true;
+}
+
+export function validateBackupDatabase(config: AppConfig, file: string, schemaVersion: number): void {
+  const dir = mkdtempSync(join(config.dataDir, '.validate-'));
+  let opened: ReturnType<typeof openDatabase> | undefined;
+  try {
+    const path = join(dir, 'check.sqlite'); copyFileSync(file, path);
+    opened = openDatabase({ filePath: path });
+    if (opened.db.prepare('PRAGMA integrity_check').get<{ integrity_check: string }>()?.integrity_check !== 'ok') throw new Error('integrity');
+    if (currentVersion(opened.db) !== schemaVersion) throw new Error('schema mismatch');
+    migrate(opened.db);
+    if (opened.db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('foreign keys');
+    databaseCounts(opened.db, true);
+  } catch { throw new TxAbort('invalid_input', '备份数据库完整性、结构或迁移校验失败。'); }
+  finally { opened?.db.close(); rmSync(dir, { recursive: true, force: true }); }
 }
 
 export function deleteBackup(config: AppConfig, name: string): void {

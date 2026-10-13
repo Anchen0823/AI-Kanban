@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { createServer } from 'node:net';
 import assert from 'node:assert/strict';
@@ -411,6 +411,48 @@ try {
     await capture('codex-fallback-qa.png');
     console.log('PASS: official Codex totals/days, reconciled official details, partial-detail fallback, clean main UI and login fallback (isolated QA fixtures).');
   } finally { qaDb.close(); }
+  // Exercise backup UI against the real isolated backend, including binary import and restore.
+  await evaluate(`location.hash = '#data'`);
+  await waitFor(() => evaluate(`document.querySelector('.backup-page h1')?.textContent.includes('数据管理') && !!document.querySelector('.backup-page input[type="url"]')`));
+  await clickLabel('立即备份');
+  await waitFor(() => evaluate(`document.querySelector('.backup-page tbody')?.textContent.includes('校验通过')`));
+  await capture('backup-desktop.png');
+  for (const width of [1000, 390]) {
+    await command('Emulation.setDeviceMetricsOverride', {width,height:1000,deviceScaleFactor:1,mobile:false});
+    assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth + 1`), true, `backup layout ${width}`);
+    await capture(`backup-${width}.png`);
+  }
+  await command('Emulation.setDeviceMetricsOverride', {width:1440,height:1080,deviceScaleFactor:1,mobile:false});
+  await evaluate(`(async () => {
+    const link = document.querySelector('.backup-page a[download]');
+    const blob = await (await fetch(link.getAttribute('href'))).blob();
+    const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'roundtrip.aiccbackup'));
+    const input = document.querySelector('.backup-page input[type="file"]'); input.files=transfer.files; input.dispatchEvent(new Event('change',{bubbles:true}));
+  })()`);
+  await clickLabel('导入并预览');
+  await waitFor(() => evaluate(`document.body.textContent.includes('确认恢复备份')`));
+  await capture('backup-restore-preview.png');
+  await clickLabel('确认覆盖并恢复');
+  await waitFor(() => evaluate(`document.querySelector('.backup-page')?.textContent.includes('恢复后已暂停自动同步')`));
+  const backupState = await evaluate(`fetch('/api/backup-settings').then(r=>r.json())`);
+  assert.equal(backupState.syncPaused, true);
+  assert.equal(backupState.persistentSecrets, true, 'Desktop must use OS-protected secrets');
+  await evaluate(`(() => {
+    const inputs = document.querySelectorAll('.backup-form-grid input');
+    ['https://backup-qa.invalid/dav/','qa-user','qa-app-secret','qa-backup-password'].forEach((value,i) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(inputs[i],value);
+      inputs[i].dispatchEvent(new Event('input',{bubbles:true}));
+    });
+  })()`);
+  await clickLabel('保存配置');
+  await waitFor(() => evaluate(`document.querySelector('.backup-page')?.textContent.includes('云端配置已保存')`));
+  const protectedBytes = readFileSync(join(profile, 'backup-secrets.bin'));
+  assert.ok(!protectedBytes.includes(Buffer.from('qa-app-secret')) && !protectedBytes.includes(Buffer.from('qa-backup-password')));
+  await capture('backup-configured.png');
+  await clickLabel('恢复自动运行');
+  await evaluate(`location.hash = '#overview'`);
+  await waitFor(() => evaluate(`!!document.querySelector('.nav-sync-button') && document.querySelector('.nav-sync-button').disabled === false`));
+  console.log('PASS: backup page, binary download/import, restore preview/confirmation, paused sync, OS-protected secrets and responsive layouts.');
   // Simulate an expired HTTP session at the renderer boundary, without changing production auth TTL.
   await evaluate(`(() => { const real = window.fetch.bind(window); window.fetch = (url, options) => String(url).startsWith('/api/history/') ? Promise.resolve(new Response(JSON.stringify({error:{message:'会话已过期'}}), {status:401,headers:{'content-type':'application/json'}})) : real(url, options); document.querySelector('.nav-sync-button').click(); })()`);
   await waitFor(() => evaluate(`document.body.innerText.includes('应用 → 重新启动') && !document.querySelector('.telemetry')`));

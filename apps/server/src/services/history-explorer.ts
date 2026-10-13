@@ -88,7 +88,10 @@ function list<T>(ctx: ServiceContext, filter: ExplorerFilter, sel: Selection, mo
   const base = `${FROM} WHERE ${sel.where}`;
   const total = ctx.db.prepare(`SELECT COUNT(DISTINCT ${group}) AS n ${base}`).get<{n:number}>(...sel.args)!.n;
   const page = Math.max(1, Math.min(filter.page ?? 1, Math.max(1, Math.ceil(total / PAGE_SIZE))));
-  const rows = ctx.db.prepare(`SELECT ${fields},${AGG} ${base} GROUP BY ${group} ORDER BY ${order(filter, mode)} LIMIT ? OFFSET ?`).all<Row>(...sel.args, PAGE_SIZE, (page - 1) * PAGE_SIZE);
+  // Rank with only the fields needed for ordering, then calculate expensive coverage
+  // aggregates for the selected page. The summary still covers the entire filter.
+  const picked = ctx.db.prepare(`SELECT ${group} AS id,MAX(b.last_at) AS last_at,TOTAL(b.totalTokens) AS totalTokens ${base} GROUP BY ${group} ORDER BY ${order(filter, mode)} LIMIT ? OFFSET ?`).all<{id:string}>(...sel.args, PAGE_SIZE, (page - 1) * PAGE_SIZE);
+  const rows = picked.length ? ctx.db.prepare(`SELECT ${fields},${AGG} ${base} AND ${group} IN (${picked.map(() => '?').join(',')}) GROUP BY ${group} ORDER BY ${order(filter, mode)}`).all<Row>(...sel.args, ...picked.map(r => r.id)) : [];
   return { items: rows.map(row => mode === 'sessions' ? session(row) : workspace(row)) as T[], total, page, pageSize: PAGE_SIZE,
     summary: metrics(ctx.db.prepare(`SELECT ${AGG} ${base}`).get<Row>(...sel.args)), context: sel.context };
 }

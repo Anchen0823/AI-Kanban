@@ -19,6 +19,9 @@ try {
     totals:{ inputTokens:100000000, outputTokens:20000000, cachedInputTokens:50000000, reasoningOutputTokens:5000000,totalTokens:120000000 },
     byDay:[], byModel:[], firstAt:null,lastAt:null,warnings:[],message:'Synthetic benchmark' }, builder), 'D:\\Synthetic');
   const insertMs = performance.now() - started;
+  const queryPlan = h.app.db.prepare(`EXPLAIN QUERY PLAN SELECT s.id,MAX(b.last_at) AS last_at,TOTAL(b.totalTokens) AS totalTokens
+    FROM history_detail_bucket b JOIN history_detail_session s ON s.id=b.session_id
+    WHERE s.is_demo=0 AND s.source='workbuddy' GROUP BY s.id ORDER BY last_at DESC NULLS LAST,s.id ASC LIMIT 50`).all();
   const results = [];
   for (const path of ['/api/history/sessions', '/api/history/sessions?page=100', '/api/history/workspaces', '/api/history/analytics', '/api/history/analytics?from=2026-09-03&to=2026-09-07&model=model-2', '/api/history/dashboard']) {
     const samples = []; let response;
@@ -38,6 +41,6 @@ try {
     assert.ok(sorted[1] < 3000, `interactive query budget: ${path} ${sorted[1]}ms`);
   }
   mkdirSync('tmp', {recursive:true});
-  writeFileSync('tmp/explorer-performance.json',JSON.stringify({sessions,buckets,insertMs:Math.round(insertMs),node:process.version,results},null,2));
+  writeFileSync('tmp/explorer-performance.json',JSON.stringify({sessions,buckets,insertMs:Math.round(insertMs),node:process.version,queryPlan,results},null,2));
   console.log(JSON.stringify({sessions,buckets,results},null,2));
 } finally { h.close(); }

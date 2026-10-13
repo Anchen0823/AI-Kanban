@@ -21,3 +21,4 @@ export * from './schemas.js';
 export * from './mcp-config.js';
 export * from './history.js';
 export * from './history-explorer.js';
+export * from './backup.js';

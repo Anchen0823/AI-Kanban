@@ -28,6 +28,7 @@ test('代理 scope 不授予工作台管理与历史数据的读取权限', asyn
       '/api/history/dashboard', '/api/history/sessions', '/api/history/workspaces', '/api/history/analytics',
       '/api/overview', '/api/usage', '/api/charges', '/api/quota', `/api/quota/history?accountId=${account}&bucketId=test`, '/api/imports',
       '/api/integrations', '/api/workspace/summary', '/api/bridge/status',
+      '/api/backup-settings', '/api/backup-jobs',
       '/api/context-exports', `/api/context-exports/${exported.body.exportId}`,
       `/api/projects/${other}/context-preview`,
     ];
@@ -38,6 +39,9 @@ test('代理 scope 不授予工作台管理与历史数据的读取权限', asyn
       assert.doesNotMatch(JSON.stringify(denied.body), /另一项目的已批准内容/);
     }
     assert.equal((await h.anonymous('GET', '/api/imports/unknown-id', undefined, headers)).status, 403);
+    for (const path of ['/api/backup-remote', '/api/backups/missing/package']) assert.equal((await h.anonymous('GET', path, undefined, headers)).status, 403);
+    for (const path of ['/api/backup-jobs', '/api/backup-settings/resume-sync']) assert.equal((await h.anonymous('POST', path, {}, headers)).status, 403);
+    assert.equal((await h.anonymous('PATCH', '/api/backup-settings', {}, headers)).status, 403);
     assert.equal((await h.anonymous('GET', '/api/history/sessions/' + 'a'.repeat(64), undefined, headers)).status, 403);
     assert.equal((await h.anonymous('GET', '/api/history/workspaces/unassigned', undefined, headers)).status, 403);
     const status = await h.anonymous<{ projects: Array<{ id: string }> }>('GET', '/api/agent/integration_status', undefined, headers);
