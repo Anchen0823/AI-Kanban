@@ -14,6 +14,8 @@ import { access, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { pipeline } from 'node:stream/promises';
+import { createZstdDecompress } from 'node:zlib';
 import type { ServiceContext } from '../service-context.js';
 import { getSetting } from '../db/repos/system.js';
 import { readCodexAccountUsage, unavailableAccountUsage, type CodexAccountUsage, type CodexAccountSummary } from '../collectors/codex-account-usage.js';
@@ -181,7 +183,7 @@ async function* rolloutFiles(root: string, maxFiles: number): AsyncGenerator<str
       // 不跟随链接，避免扫描被重定向到用户不期望的目录树。
       if (entry.isDirectory()) {
         pending.push(path);
-      } else if (entry.isFile() && /^rollout.*\.jsonl$/i.test(entry.name)) {
+      } else if (entry.isFile() && /^rollout.*\.jsonl(?:\.zst)?$/i.test(entry.name)) {
         yield path;
         yielded += 1;
         if (yielded >= maxFiles) return;
@@ -194,7 +196,17 @@ async function scanFile(path: string, sessions: Map<string, SessionData>, warnin
   let sessionId: string | null = null;
   let currentModel: string | null = null;
   const pendingEvents: UsageEvent[] = [];
-  const stream = createReadStream(path, { encoding: 'utf8' });
+  // Codex compresses older rollouts in place. Read both formats without
+  // extracting conversation bodies to disk; existing event deduplication also
+  // handles a plain/compressed copy of the same session.
+  const fileStream = createReadStream(path);
+  const decompressor = /\.zst$/i.test(path) ? createZstdDecompress() : null;
+  const stream = decompressor ?? fileStream;
+  stream.setEncoding('utf8');
+  const completion = decompressor ? pipeline(fileStream, decompressor) : null;
+  // Observe failures immediately while readline consumes the stream, then
+  // await completion below so a damaged compressed file fails the scan.
+  void completion?.catch(() => undefined);
   const lines = createInterface({ input: stream, crlfDelay: Infinity });
 
   try {
@@ -250,9 +262,12 @@ async function scanFile(path: string, sessions: Map<string, SessionData>, warnin
         : `ordinal:${ordinal}`;
       pendingEvents.push({ key, ordinal, timestamp, model: eventModel, totals: usage.totals });
     }
+    await completion;
   } finally {
     lines.close();
     stream.destroy();
+    fileStream.destroy();
+    await completion?.catch(() => undefined);
   }
 
   if (!sessionId) {

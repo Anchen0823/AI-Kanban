@@ -21,7 +21,7 @@ npm run desktop             # 构建并启动桌面端
 npm run desktop:pack        # Windows x64：构建、准备内置 Node 与依赖、生成便携 EXE
 ```
 
-打包需要 Windows x64、Node >= 22.5 和联网下载依赖。准备脚本只复制生产依赖、构建产物及 Node 许可证，不包含数据库、用户配置、源码或测试数据。构建产物统一保存在 `release/current/`，暂存目录为 `.desktop-runtime/`，二者均不提交 Git。包未做商业代码签名，Windows 可能显示未知发布者提示。
+打包需要 Windows x64、Node >= 22.15 和联网下载依赖。准备脚本只复制生产依赖、构建产物及 Node 许可证，不包含数据库、用户配置、源码或测试数据。构建产物统一保存在 `release/current/`，暂存目录为 `.desktop-runtime/`，二者均不提交 Git。包未做商业代码签名，Windows 可能显示未知发布者提示。
 
 若 npm 禁止了 Electron 安装脚本，可显式执行 `node node_modules/electron/install.js`。下载失败时可设置 `ELECTRON_MIRROR`；安装器仍检查 Electron 包附带的校验和。
 

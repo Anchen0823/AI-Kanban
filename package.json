@@ -5,7 +5,7 @@
   "description": "AI Control Center — 个人 AI 历史用量与额度工作台",
   "type": "module",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.15.0"
   },
   "workspaces": [
     "packages/*",

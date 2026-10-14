@@ -8,6 +8,8 @@ Codex 同步首先尝试本机 CLI 的 `account/usage/read`；官方累计与每
 
 官方查询要求 Codex CLI 使用 ChatGPT 登录；运行 `codex login` 并选择对应账号。未登录、不支持或超时均明确显示回退原因。官方失败时不恢复旧官方账户累计。Windows 自动查找原生 CLI，显式 `AICC_CODEX_COMMAND` 优先。
 
+本机 Codex 扫描覆盖 `sessions` 和 `archived_sessions` 中的 `rollout*.jsonl` 与 `rollout*.jsonl.zst`。旧日志压缩后仍参与累计、每日趋势、模型排行与本机明细；读取时流式解压，不将原始聊天内容解包落盘。普通和压缩副本沿用会话／事件去重，损坏或截断的压缩文件不会发布部分本机统计；官方不可用时保留同配置的上次有效本机快照。源码运行需要 Node >=22.15，桌面包使用自带 Node。
+
 WorkBuddy、OpenCode、MiniMax Code 只读扫描本机保留的日志或数据库，不保证覆盖其他设备和已删除记录。DeepSeek 从用户选定的 ZIP/CSV 导出目录读取，统计缓存只保留聚合结果与脱敏同步信息；成功选择的目录单独保存在本机设置中，仅在已配对用户的真实工作区返回。
 
 ## 快照、失败与覆盖

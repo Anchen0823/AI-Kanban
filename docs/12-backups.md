@@ -41,6 +41,12 @@ Windows 桌面端使用 Electron safeStorage／DPAPI 保存网盘凭据和备份
 
 默认验证使用合成数据和内存 WebDAV 协议测试，不连接开发者账户。真实网盘需通过「测试连接」和一次上传／下载恢复演练确认兼容性。
 
+## GitHub 备份方案
+
+GitHub 可以保存数据库备份，但本版尚未接入 GitHub 上传或自动备份。建议独立私有仓库，先用本地备份生成 SQLite 一致性快照，再用独立密码加密，最后作为 Release 附件上传。下载后应校验、解密并通过恢复预览验证。GitHub [Release 附件](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)支持二进制文件，每个附件须小于 2 GiB；本应用备份包上限仍为 128 MiB。
+
+普通下载的 `.aiccbackup` 包没有加密；完整数据库包含会话标题、标识和项目目录。不要将这些明文文件上传到公开源码仓库，也不要直接提交正在使用的 SQLite、WAL 或 SHM 文件。加密密码应在 GitHub 之外保存。现有 WebDAV 云上传已经提供加密与回读校验，可作为后续 GitHub 适配的基础。
+
 ## 接口
 
 - 现有 `/api/backups` 和 `/:name/restore-plan`、`/:name/restore` 保持兼容。

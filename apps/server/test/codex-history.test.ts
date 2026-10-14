@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { zstdCompressSync } from 'node:zlib';
 import { getSetting, setSetting } from '../src/db/repos/system.js';
 import { getCodexHistory, runCodexHistory, scanCodexHistory } from '../src/services/codex-history.js';
 import { createHarness } from './helpers.js';
@@ -148,6 +149,56 @@ test('Codex 本机历史按 session 合并备份，累计计数取增量并处�
     assert.ok(result.warnings.some((warning) => /无法解析/.test(warning)));
     assert.doesNotMatch(JSON.stringify(result), /never-store-chat-body/);
   } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('Codex 压缩历史与普通日志统计一致，混合副本不重复累计', async () => {
+  const home = await fixtureHome();
+  try {
+    const expected = await scanCodexHistory({ codexHome: home });
+    for (const root of ['sessions', 'archived_sessions']) {
+      const directory = join(home, root);
+      for (const name of await readdir(directory, { recursive: true })) {
+        if (!name.endsWith('.jsonl')) continue;
+        const path = join(directory, name);
+        await writeFile(`${path}.zst`, zstdCompressSync(await readFile(path)));
+        if (!name.endsWith('rollout-live.jsonl')) await rm(path);
+      }
+    }
+    const actual = await scanCodexHistory({ codexHome: home });
+    assert.equal(actual.status, 'ok');
+    assert.equal(actual.sessionCount, expected.sessionCount);
+    assert.deepEqual(actual.totals, expected.totals);
+    assert.deepEqual(actual.byModel, expected.byModel);
+    assert.deepEqual(actual.byDay, expected.byDay);
+    assert.equal(actual.firstAt, expected.firstAt);
+    assert.equal(actual.lastAt, expected.lastAt);
+    assert.doesNotMatch(JSON.stringify(actual), /never-store-chat-body/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('Codex 损坏或截断的压缩历史使同步失败，并保留上次有效本机统计', async () => {
+  const home = await fixtureHome();
+  const h = await createHarness();
+  const options = { codexHome: home, readOfficial: async () => unavailableAccountUsage('官方不可用。') };
+  try {
+    const good = await runCodexHistory(h.app.ctx, options);
+    assert.equal(good.status, 'ok');
+    const payload = zstdCompressSync(await readFile(join(home, 'sessions', '2026', '09', '19', 'rollout-live.jsonl')));
+    for (const bytes of [Buffer.from('invalid zstd'), payload.subarray(0, payload.length - 3)]) {
+      await writeFile(join(home, 'sessions', 'rollout-damaged.jsonl.zst'), bytes);
+      const result = await runCodexHistory(h.app.ctx, options);
+      assert.equal(result.status, 'error');
+      const retained = getCodexHistory(h.app.ctx);
+      assert.deepEqual(retained.totals, good.totals);
+      assert.deepEqual(retained.byModel, good.byModel);
+      assert.equal(retained.sync?.stale, true);
+    }
+  } finally {
+    await h.close();
     await rm(home, { recursive: true, force: true });
   }
 });
